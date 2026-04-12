@@ -176,53 +176,61 @@ export default function Dashboard() {
 
       <style>{`
         .dashboard-hero {
-          background: var(--bg-card);
+          background: var(--gradient-hero);
           border: 1px solid var(--border-color);
-          border-left: 4px solid var(--accent-primary);
           border-radius: var(--radius-xl);
-          padding: 40px 44px;
+          padding: 44px 48px;
           margin-bottom: 28px;
           position: relative;
           overflow: hidden;
         }
         .hero-content { position: relative; z-index: 2; }
         .hero-title {
-          font-size: 2.2rem;
-          font-weight: 400;
+          font-size: 2.4rem;
+          font-weight: 700;
           margin-bottom: 12px;
           font-family: var(--font-heading);
           color: var(--text-primary);
+          letter-spacing: -0.03em;
         }
-        .gradient-text { color: var(--accent-primary); }
+        .gradient-text {
+          background: var(--gradient-primary);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
         .hero-quote {
-          color: var(--text-muted);
-          font-size: 0.95rem;
+          color: var(--text-secondary);
+          font-size: 0.9rem;
           font-style: italic;
-          margin-bottom: 24px;
-          max-width: 600px;
-          border-left: 2px solid var(--cream-dark);
+          margin-bottom: 28px;
+          max-width: 520px;
           padding-left: 14px;
+          border-left: 2px solid rgba(123,97,255,0.4);
         }
         .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
-        .hero-decoration { position: absolute; top: 0; right: 0; bottom: 0; width: 40%; pointer-events: none; }
+        .hero-decoration { position: absolute; top: 0; right: 0; bottom: 0; width: 50%; pointer-events: none; }
         .hero-orb {
           position: absolute;
           border-radius: 50%;
+          animation: float 7s ease-in-out infinite;
         }
         .hero-orb-1 {
-          width: 220px; height: 220px;
-          background: radial-gradient(circle, rgba(228,61,18,0.06), transparent);
-          top: -10%; right: 5%;
+          width: 300px; height: 300px;
+          background: radial-gradient(circle, rgba(123,97,255,0.15), transparent);
+          top: -20%; right: 5%;
         }
         .hero-orb-2 {
-          width: 160px; height: 160px;
-          background: radial-gradient(circle, rgba(239,177,29,0.08), transparent);
-          bottom: -10%; right: 25%;
+          width: 200px; height: 200px;
+          background: radial-gradient(circle, rgba(224,64,251,0.1), transparent);
+          bottom: -10%; right: 30%;
+          animation-delay: -3s;
         }
         .hero-orb-3 {
-          width: 120px; height: 120px;
-          background: radial-gradient(circle, rgba(213,83,109,0.06), transparent);
-          top: 20%; right: 40%;
+          width: 140px; height: 140px;
+          background: radial-gradient(circle, rgba(0,229,255,0.08), transparent);
+          top: 15%; right: 50%;
+          animation-delay: -5s;
         }
 
         .task-list { display: flex; flex-direction: column; gap: 8px; }

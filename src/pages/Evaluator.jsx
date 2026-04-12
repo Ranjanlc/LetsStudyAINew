@@ -221,12 +221,12 @@ export default function Evaluator() {
         }
         .option:hover {
           border-color: var(--accent-primary);
-          background: rgba(228,61,18,0.05);
+          background: rgba(255,75,110,0.06);
           color: var(--text-primary);
         }
         .option.selected {
           border-color: var(--accent-primary);
-          background: rgba(228,61,18,0.1);
+          background: rgba(255,75,110,0.1);
           color: var(--text-primary);
         }
         .option-letter {
@@ -466,7 +466,7 @@ function QuizInterface({ quiz, currentQuestion, setCurrentQuestion, answers, onA
           <div
             className="question-timer"
             style={{
-              background: timerDanger ? 'rgba(228,61,18,0.12)' : 'rgba(228,61,18,0.1)',
+              background: timerDanger ? 'rgba(255,75,110,0.12)' : 'rgba(255,75,110,0.1)',
               color: timerDanger ? 'var(--accent-danger)' : 'var(--accent-primary)',
             }}
           >
@@ -507,7 +507,7 @@ function QuizInterface({ quiz, currentQuestion, setCurrentQuestion, answers, onA
                 onClick={() => setCurrentQuestion(i)}
                 style={{
                   width: 32, height: 32, borderRadius: '50%', border: 'none',
-                  background: i === currentQuestion ? 'var(--accent-primary)' : answers[i] !== undefined ? 'rgba(228,61,18,0.12)' : 'var(--bg-secondary)',
+                  background: i === currentQuestion ? 'var(--accent-primary)' : answers[i] !== undefined ? 'rgba(255,75,110,0.12)' : 'var(--bg-secondary)',
                   color: i === currentQuestion ? 'white' : 'var(--text-secondary)',
                   cursor: 'pointer', fontWeight: 600, fontSize: '0.75rem',
                   fontFamily: 'var(--font-body)', transition: 'all 0.2s ease',
@@ -570,7 +570,7 @@ function QuizResults({ result, onRetry }) {
           {result.results.map((r, i) => (
             <div key={i} className="result-item">
               <div className="result-icon" style={{
-                background: r.isCorrect ? 'rgba(42,122,75,0.12)' : 'rgba(228,61,18,0.12)',
+                background: r.isCorrect ? 'rgba(0,230,118,0.12)' : 'rgba(255,75,110,0.12)',
                 color: r.isCorrect ? 'var(--accent-success)' : 'var(--accent-danger)',
               }}>
                 {r.isCorrect ? <HiOutlineCheck /> : <HiOutlineX />}
@@ -655,7 +655,7 @@ function PerformanceDashboard({ report, quizHistory }) {
             <div style={{ marginBottom: '16px' }}>
               <h4 style={{ fontSize: '0.85rem', color: 'var(--accent-success)', marginBottom: '8px' }}>Strengths</h4>
               {report.strengths.map(s => (
-                <div key={s} style={{ padding: '8px 12px', background: 'rgba(42,122,75,0.06)', borderRadius: 'var(--radius-sm)', marginBottom: '4px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                <div key={s} style={{ padding: '8px 12px', background: 'rgba(0,230,118,0.06)', borderRadius: 'var(--radius-sm)', marginBottom: '4px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                   {s}
                 </div>
               ))}
@@ -665,7 +665,7 @@ function PerformanceDashboard({ report, quizHistory }) {
             <div>
               <h4 style={{ fontSize: '0.85rem', color: 'var(--accent-danger)', marginBottom: '8px' }}>⚠️ Needs Work</h4>
               {report.weaknesses.map(w => (
-                <div key={w} style={{ padding: '8px 12px', background: 'rgba(228,61,18,0.06)', borderRadius: 'var(--radius-sm)', marginBottom: '4px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                <div key={w} style={{ padding: '8px 12px', background: 'rgba(255,75,110,0.06)', borderRadius: 'var(--radius-sm)', marginBottom: '4px', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                   {w}
                 </div>
               ))}

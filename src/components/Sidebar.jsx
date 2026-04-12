@@ -1,9 +1,10 @@
 import { NavLink } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useTheme } from '../context/ThemeContext';
 import {
   HiOutlineHome, HiOutlineCalendar, HiOutlineAcademicCap,
   HiOutlineClipboardCheck, HiOutlineUser, HiOutlineDocumentText,
-  HiOutlineBookOpen,
+  HiOutlineBookOpen, HiOutlineMoon, HiOutlineSun,
 } from 'react-icons/hi';
 
 const navItems = [
@@ -17,14 +18,16 @@ const navItems = [
 
 export default function Sidebar() {
   const { state } = useApp();
+  const { theme, toggleTheme } = useTheme();
 
-  // Get initials for avatar
   const initials = (state.user.name || 'S')
     .split(' ')
     .map(w => w[0])
     .join('')
     .slice(0, 2)
     .toUpperCase();
+
+  const isLight = theme === 'light';
 
   return (
     <aside className="sidebar">
@@ -51,6 +54,16 @@ export default function Sidebar() {
             <span>{item.label}</span>
           </NavLink>
         ))}
+
+        <div className="nav-section-title" style={{ marginTop: 12 }}>Appearance</div>
+        <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+          {isLight
+            ? <HiOutlineMoon className="nav-icon" />
+            : <HiOutlineSun className="nav-icon" />
+          }
+          <span>{isLight ? 'Dark Mode' : 'Light Mode'}</span>
+          <span className="theme-pill">{isLight ? 'Dark' : 'Light'}</span>
+        </button>
       </nav>
 
       <div className="sidebar-footer">
@@ -62,6 +75,33 @@ export default function Sidebar() {
           </div>
         </NavLink>
       </div>
+
+      <style>{`
+        .theme-toggle-btn {
+          width: 100%;
+          border: none;
+          background: transparent;
+          cursor: pointer;
+          font-family: var(--font-body);
+          text-align: left;
+        }
+        .theme-pill {
+          margin-left: auto;
+          font-size: 0.6rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.8px;
+          padding: 2px 7px;
+          border-radius: 99px;
+          background: rgba(123,97,255,0.2);
+          color: #a78bfa;
+          flex-shrink: 0;
+        }
+        [data-theme="light"] .theme-pill {
+          background: rgba(201,58,14,0.14);
+          color: #C93A0E;
+        }
+      `}</style>
     </aside>
   );
 }

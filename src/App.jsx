@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
+import { ThemeProvider } from './context/ThemeContext';
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
 import Planner from './pages/Planner';
@@ -10,6 +11,7 @@ import Profile from './pages/Profile';
 
 function App() {
   return (
+    <ThemeProvider>
     <AppProvider>
       <BrowserRouter>
         <div className="app-layout">
@@ -27,6 +29,7 @@ function App() {
         </div>
       </BrowserRouter>
     </AppProvider>
+    </ThemeProvider>
   );
 }
 

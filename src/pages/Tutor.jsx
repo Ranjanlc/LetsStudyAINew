@@ -492,7 +492,7 @@ export default function Tutor() {
         }
         .source-chip {
           padding: 2px 8px; border-radius: 10;
-          background: rgba(228,61,18,0.1); border: 1px solid rgba(228,61,18,0.25);
+          background: rgba(123,97,255,0.1); border: 1px solid rgba(123,97,255,0.25);
           color: var(--accent-primary); border-radius: 20px;
           cursor: default; font-size: 0.72rem;
         }

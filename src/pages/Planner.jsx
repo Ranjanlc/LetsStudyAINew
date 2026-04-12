@@ -5,9 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { HiOutlinePlus, HiOutlineTrash, HiOutlineCalendar, HiOutlineLightningBolt, HiOutlineCheckCircle, HiOutlineClock, HiOutlineX, HiOutlineSparkles } from 'react-icons/hi';
 
 const SUBJECT_COLORS = [
-  '#E43D12', '#D6536D', '#EFB11D', '#2A7A4B',
-  '#3B6FD4', '#C2410C', '#7C3AED', '#1D7A6E',
-  '#B45309', '#9D1E73',
+  '#7B61FF', '#E040FB', '#00E5FF', '#00E676',
+  '#FFD740', '#FF4B6E', '#40C4FF', '#FFAB40',
+  '#69F0AE', '#EA80FC',
 ];
 
 const SAMPLE_SUBJECTS = ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'Computer Science', 'English', 'History', 'Science'];
@@ -77,7 +77,7 @@ export default function Planner() {
       {/* Stats Row */}
       <div className="stats-grid">
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(228,61,18,0.1)', color: 'var(--accent-primary)' }}>
+          <div className="stat-icon" style={{ background: 'rgba(123,97,255,0.15)', color: 'var(--accent-primary)' }}>
             <HiOutlineCalendar />
           </div>
           <div className="stat-info">
@@ -86,7 +86,7 @@ export default function Planner() {
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(213,83,109,0.1)', color: 'var(--accent-secondary)' }}>
+          <div className="stat-icon" style={{ background: 'rgba(224,64,251,0.12)', color: 'var(--accent-secondary)' }}>
             <HiOutlineClock />
           </div>
           <div className="stat-info">
@@ -95,7 +95,7 @@ export default function Planner() {
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(42,122,75,0.1)', color: 'var(--accent-success)' }}>
+          <div className="stat-icon" style={{ background: 'rgba(0,230,118,0.12)', color: 'var(--accent-success)' }}>
             <HiOutlineCheckCircle />
           </div>
           <div className="stat-info">
@@ -104,7 +104,7 @@ export default function Planner() {
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(239,177,29,0.12)', color: 'var(--accent-tertiary)' }}>
+          <div className="stat-icon" style={{ background: 'rgba(255,215,64,0.12)', color: 'var(--accent-warning)' }}>
             <HiOutlineLightningBolt />
           </div>
           <div className="stat-info">
