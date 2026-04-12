@@ -1,16 +1,62 @@
-# React + Vite
+# LetsStudyAI — AI-Powered Personal Study Assistant
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A multi-agent AI study assistant using RAG (Retrieval Augmented Generation) so students can upload their own notes and get AI-powered answers from them.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Planner Agent** — generates personalized study schedules from your subjects and deadlines
+- **Tutor Agent** — answers questions using your uploaded notes (RAG) via Groq LLM
+- **Evaluator Agent** — quizzes you on topics and tracks your performance
+- **My Documents** — upload PDF, DOCX, or TXT notes to power the AI Tutor
 
-## React Compiler
+## Quick Start
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 1. Get a free Groq API key
 
-## Expanding the ESLint configuration
+Sign up at [console.groq.com](https://console.groq.com) — no credit card required.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### 2. Configure the backend
+
+```bash
+cd server
+cp .env.example .env
+# Edit server/.env and paste your Groq API key
+```
+
+### 3. Start the backend
+
+```bash
+cd server
+npm install
+npm start
+# Runs on http://localhost:3001
+```
+
+### 4. Start the frontend (in a new terminal)
+
+```bash
+npm install
+npm run dev
+# Runs on http://localhost:5173
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19, Vite, Framer Motion |
+| Backend | Node.js, Express |
+| LLM | Groq API (llama-3.1-8b-instant) |
+| RAG | TF-IDF cosine similarity (in-memory) |
+| Document parsing | pdf-parse, mammoth |
+
+## Project Team
+
+| Name | Role |
+|------|------|
+| Pankaj Bhatta | Tutor Agent + Backend/RAG |
+| Ranjan Lamichhane | System Design + Integration |
+| Aadarsha Aryal | Planner Agent |
+| Diwakar Mahato Sudi | Evaluator Agent |
+
+CSCI 4083 — Dr. Dileon Saint Jean

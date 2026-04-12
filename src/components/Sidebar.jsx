@@ -1,12 +1,13 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { HiOutlineHome, HiOutlineCalendar, HiOutlineAcademicCap, HiOutlineClipboardCheck, HiOutlineUser } from 'react-icons/hi';
+import { HiOutlineHome, HiOutlineCalendar, HiOutlineAcademicCap, HiOutlineClipboardCheck, HiOutlineUser, HiOutlineDocumentText } from 'react-icons/hi';
 
 const navItems = [
   { path: '/', icon: HiOutlineHome, label: 'Dashboard' },
   { path: '/planner', icon: HiOutlineCalendar, label: 'Planner Agent' },
   { path: '/tutor', icon: HiOutlineAcademicCap, label: 'Tutor Agent' },
   { path: '/evaluator', icon: HiOutlineClipboardCheck, label: 'Evaluator Agent' },
+  { path: '/documents', icon: HiOutlineDocumentText, label: 'My Documents' },
   { path: '/profile', icon: HiOutlineUser, label: 'Profile' },
 ];
 

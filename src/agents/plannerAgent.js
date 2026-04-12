@@ -54,7 +54,7 @@ export const plannerAgent = {
           subjectName: subject.name,
           topic: `Revision: All ${subject.name} topics`,
           date: revisionDate.toISOString().split('T')[0],
-          duration: priorityHours(subject.priority),
+          duration: priorityHours[subject.priority] || 2,
           priority: 'high',
           completed: false,
           type: 'revision',

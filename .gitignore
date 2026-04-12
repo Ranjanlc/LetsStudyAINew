@@ -1,3 +1,10 @@
+# Environment variables (never commit API keys)
+server/.env
+.env
+
+# Uploaded documents
+server/uploads/
+
 # Logs
 logs
 *.log

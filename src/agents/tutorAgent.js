@@ -241,6 +241,8 @@ const knowledgeBase = {
   },
 };
 
+const API_BASE = 'http://localhost:3001/api';
+
 export const tutorAgent = {
   name: 'Tutor Agent',
   description: 'Explains concepts in a simple, interactive way and answers student questions.',
@@ -260,15 +262,40 @@ export const tutorAgent = {
     return null;
   },
 
+  // Real AI call via backend (Groq + RAG)
+  async getChatResponseAI(message, conversationHistory = []) {
+    const history = conversationHistory
+      .slice(-12)
+      .map(m => ({ role: m.role, content: m.text || m.content || '' }));
+
+    const res = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, conversationHistory: history }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to get AI response');
+    }
+
+    return {
+      text: data.answer,
+      type: 'ai',
+      hasContext: data.hasContext,
+      sources: data.sources || [],
+      model: data.model,
+    };
+  },
+
   answerQuestion(question) {
     const q = question.toLowerCase();
 
-    // Search through knowledge base for relevant answers
     for (const subject of Object.keys(knowledgeBase)) {
       for (const topic of Object.keys(knowledgeBase[subject])) {
         const data = knowledgeBase[subject][topic];
         const topicLower = topic.toLowerCase();
-        const summaryLower = data.summary.toLowerCase();
 
         if (q.includes(topicLower) || topicLower.includes(q.replace(/what is |explain |tell me about |how does |define /g, '').trim())) {
           return {
@@ -281,7 +308,6 @@ export const tutorAgent = {
           };
         }
 
-        // Check key points for keywords
         for (const point of data.keyPoints) {
           const keywords = point.toLowerCase().split(/\s+/);
           const qwords = q.split(/\s+/);
@@ -300,7 +326,6 @@ export const tutorAgent = {
       }
     }
 
-    // Generic helpful response
     return {
       found: false,
       answer: generateHelpfulResponse(q),
@@ -309,20 +334,21 @@ export const tutorAgent = {
     };
   },
 
+  // Fallback: hardcoded knowledge base (used when backend is offline)
   getChatResponse(message, conversationHistory = []) {
     const greetings = ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'];
     const msgLower = message.toLowerCase().trim();
 
     if (greetings.some(g => msgLower.startsWith(g))) {
       return {
-        text: "Hello! 👋 I'm your AI Tutor. I can help you understand concepts in Mathematics, Science, Computer Science, Physics, Chemistry, and Biology. What would you like to learn about?",
+        text: "Hello! I'm your AI Tutor. I can help you understand concepts in Mathematics, Science, Computer Science, Physics, Chemistry, and Biology. What would you like to learn about?",
         type: 'greeting',
       };
     }
 
     if (msgLower.includes('thank')) {
       return {
-        text: "You're welcome! 😊 Keep up the great work. Feel free to ask me anything else!",
+        text: "You're welcome! Keep up the great work. Feel free to ask me anything else!",
         type: 'thanks',
       };
     }
