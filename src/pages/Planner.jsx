@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { plannerAgent } from '../agents/plannerAgent';
+import { formatLocalDateKey } from '../utils/dateUtils';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   HiOutlinePlus, HiOutlineTrash, HiOutlineCalendar,
@@ -38,7 +39,7 @@ const DIFFICULTY_CONFIG = {
 function daysFromNow(n) {
   const d = new Date();
   d.setDate(d.getDate() + n);
-  return d.toISOString().split('T')[0];
+  return formatLocalDateKey(d);
 }
 
 const DEMO_SUBJECTS = [
@@ -96,7 +97,7 @@ export default function Planner() {
     priority: 'medium', difficulty: 'medium', estimatedHours: '',
   });
 
-  const today     = new Date().toISOString().split('T')[0];
+  const today     = formatLocalDateKey();
   const progress  = plannerAgent.getProgress(state.studyPlan);
   const totalHours = plannerAgent.getTotalHours(state.studyPlan);
   const streak    = plannerAgent.getStudyStreak(state.studyPlan);
@@ -191,10 +192,10 @@ export default function Planner() {
   const loadDemoData = async () => {
     setDemoLoading(true);
     setDismissedAlert(false);
-    dispatch({ type: 'RESET_DATA' });
-    await new Promise(r => setTimeout(r, 60));
+    // Replace only planner data; keep user profile and other account data intact.
+    dispatch({ type: 'SET_STUDY_PLAN', payload: [] });
+    state.subjects.forEach(s => dispatch({ type: 'REMOVE_SUBJECT', payload: s.id }));
     DEMO_SUBJECTS.forEach(s => dispatch({ type: 'ADD_SUBJECT', payload: s }));
-    await new Promise(r => setTimeout(r, 60));
     await generatePlanFromSubjects(DEMO_SUBJECTS);
     setActiveTab('schedule');
     setDemoLoading(false);

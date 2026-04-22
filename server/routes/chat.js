@@ -1,7 +1,9 @@
 const express = require('express');
 const Groq = require('groq-sdk');
 const { buildMessages, getRagContext } = require('../rag/ragEngine');
-const { getDocumentChunks, getDocumentList } = require('../rag/vectorStore');
+const { getDocumentChunks } = require('../rag/vectorStore');
+const { requireAuth } = require('../middleware/auth');
+const { ensureUserDocumentsIndexed, userOwnsDocument } = require('../services/documentIndex');
 
 const router = express.Router();
 
@@ -17,6 +19,8 @@ function getGroqClient() {
   }
   return groq;
 }
+
+router.use(requireAuth);
 
 // POST /api/chat
 router.post('/', async (req, res) => {
@@ -35,10 +39,9 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    // Retrieve relevant context from uploaded documents
-    const { chunks, hasContext } = await getRagContext(message.trim());
+    await ensureUserDocumentsIndexed(req.user.id);
+    const { chunks, hasContext } = await getRagContext(message.trim(), req.user.id);
 
-    // Build message array with RAG context + conversation history
     const messages = buildMessages(conversationHistory, message.trim(), chunks);
 
     const completion = await client.chat.completions.create({
@@ -73,9 +76,6 @@ router.post('/', async (req, res) => {
 });
 
 // POST /api/chat/generate-quiz
-// Supports two modes:
-//   1. documentId + focusTopic → generate from uploaded document (RAG-based)
-//   2. topic + subject          → generate from topic name (generic AI)
 router.post('/generate-quiz', async (req, res) => {
   const { topic, subject, numQuestions = 5, documentId, focusTopic } = req.body;
 
@@ -90,8 +90,13 @@ router.post('/generate-quiz', async (req, res) => {
   let sourceDoc = null;
 
   if (documentId) {
-    // Document mode: pull ALL chunks from the selected document
-    const docChunks = getDocumentChunks(documentId);
+    await ensureUserDocumentsIndexed(req.user.id);
+    const owns = await userOwnsDocument(req.user.id, documentId);
+    if (!owns) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+
+    const docChunks = getDocumentChunks(req.user.id, documentId);
     if (docChunks.length === 0) {
       return res.status(404).json({ error: 'Document not found or has no indexed content.' });
     }
@@ -100,14 +105,13 @@ router.post('/generate-quiz', async (req, res) => {
     quizTopic = focusTopic || sourceDoc;
     quizSubject = 'Document Quiz';
 
-    // Use up to 6000 chars of content to stay within token limits
     const allText = docChunks.map(c => c.text).join('\n\n');
     const trimmed = allText.length > 6000 ? allText.slice(0, 6000) + '...' : allText;
 
     contextText = `You are generating quiz questions STRICTLY based on the following document content.\n\nDocument: "${sourceDoc}"\n\nContent:\n${trimmed}\n\n`;
   } else {
-    // Topic mode: do a RAG search for context if available
-    const { chunks } = await getRagContext(`${subject} ${topic} questions quiz`);
+    await ensureUserDocumentsIndexed(req.user.id);
+    const { chunks } = await getRagContext(`${subject} ${topic} questions quiz`, req.user.id);
     if (chunks.length > 0) {
       contextText = `Use these relevant student notes as additional context:\n${chunks.map(c => c.text).join('\n\n')}\n\n`;
     }

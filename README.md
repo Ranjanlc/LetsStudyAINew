@@ -20,7 +20,17 @@ There's also a Documents page where you upload your notes (PDF, DOCX, or TXT) so
 
 ## How to Run It
 
-You need two terminals — one for the backend and one for the frontend.
+You need **PostgreSQL** running locally (or set `DATABASE_URL` to any Postgres you control), plus two terminals — backend and frontend.
+
+### Step 0 — PostgreSQL
+
+Create a database (example name `letsstudyai`). Quick option with Docker:
+
+```bash
+docker run --name letsstudyai-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=letsstudyai -p 5432:5432 -d postgres:16
+```
+
+Then set `DATABASE_URL` in `server/.env` (see Step 2).
 
 ### Step 1 — Get a free Groq API key
 
@@ -33,7 +43,13 @@ cd server
 cp .env.example .env
 ```
 
-Open `server/.env` and paste your Groq API key where it says `GROQ_API_KEY=`.
+Open `server/.env` and set:
+
+- **`DATABASE_URL`** — e.g. `postgres://postgres:postgres@localhost:5432/letsstudyai`
+- **`JWT_SECRET`** — any random string **at least 16 characters** (used to sign login tokens)
+- **`GROQ_API_KEY`** — optional but needed for AI tutor / planner / quizzes
+
+The server creates tables on first start.
 
 ### Step 3 — Start the backend
 
@@ -52,7 +68,7 @@ npm install
 npm run dev
 ```
 
-It runs on `http://localhost:5173` — open that in your browser.
+It runs on `http://localhost:5173` — open that in your browser. **Register** a new account on first visit (your study plan, chat, and profile are stored per user in Postgres).
 
 ---
 
@@ -62,6 +78,7 @@ It runs on `http://localhost:5173` — open that in your browser.
 |------|-------------|
 | Frontend | React 19, Vite, Framer Motion |
 | Backend | Node.js, Express |
+| Accounts | JWT + bcrypt, PostgreSQL (`users`, `user_app_state`, `user_documents`) |
 | AI / LLM | Groq API (Llama 3) — free |
 | Document Search (RAG) | TF-IDF + cosine similarity |
 | File Parsing | pdf-parse (PDF), mammoth (DOCX) |

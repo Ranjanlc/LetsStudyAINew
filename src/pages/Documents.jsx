@@ -7,7 +7,7 @@ import {
   HiOutlineCloudUpload, HiOutlineFolder, HiOutlineDocumentDuplicate,
 } from 'react-icons/hi';
 
-const API_BASE = 'http://localhost:3001/api';
+import { apiFetch, API_ORIGIN } from '../lib/api';
 
 const ALLOWED_TYPES = {
   'application/pdf': '.pdf',
@@ -33,7 +33,7 @@ export default function Documents() {
 
   async function checkServer() {
     try {
-      const res = await fetch(`${API_BASE}/health`);
+      const res = await fetch(`${API_ORIGIN}/api/health`);
       const data = await res.json();
       setServerStatus(data);
       if (res.ok) loadDocuments();
@@ -44,7 +44,7 @@ export default function Documents() {
 
   async function loadDocuments() {
     try {
-      const res = await fetch(`${API_BASE}/documents`);
+      const res = await apiFetch('/api/documents');
       const data = await res.json();
       setDocuments(data.documents || []);
     } catch {
@@ -78,7 +78,7 @@ export default function Documents() {
     formData.append('document', file);
 
     try {
-      const res = await fetch(`${API_BASE}/documents/upload`, {
+      const res = await apiFetch('/api/documents/upload', {
         method: 'POST',
         body: formData,
       });
@@ -101,7 +101,7 @@ export default function Documents() {
 
   async function deleteDocument(id, name) {
     try {
-      const res = await fetch(`${API_BASE}/documents/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/documents/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setDocuments(prev => prev.filter(d => d.id !== id));
         addNotification('success', `"${name}" removed from knowledge base.`);

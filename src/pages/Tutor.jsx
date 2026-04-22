@@ -7,8 +7,7 @@ import {
   HiOutlineLightBulb, HiOutlineChevronRight, HiOutlineSparkles,
   HiOutlineDatabase, HiOutlineExclamationCircle,
 } from 'react-icons/hi';
-
-const API_BASE = 'http://localhost:3001/api';
+import { apiFetch, API_ORIGIN } from '../lib/api';
 
 export default function Tutor() {
   const { state, dispatch } = useApp();
@@ -35,11 +34,11 @@ export default function Tutor() {
   async function checkBackend() {
     try {
       const [healthRes, docsRes] = await Promise.all([
-        fetch(`${API_BASE}/health`),
-        fetch(`${API_BASE}/documents`),
+        fetch(`${API_ORIGIN}/api/health`),
+        apiFetch('/api/documents'),
       ]);
       const health = await healthRes.json();
-      const docs = await docsRes.json();
+      const docs = docsRes.ok ? await docsRes.json() : { documents: [] };
       setBackendStatus({
         groqConfigured: health.groqConfigured,
         docCount: docs.documents?.length || 0,

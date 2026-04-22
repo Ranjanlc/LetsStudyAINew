@@ -1,6 +1,7 @@
-// Planner Agent — Creates study schedules based on subjects, topics, and deadlines
+import { formatLocalDateKey } from '../utils/dateUtils';
+import { apiFetch } from '../lib/api';
 
-const API_BASE = 'http://localhost:3001';
+// Planner Agent — Creates study schedules based on subjects, topics, and deadlines
 
 export const plannerAgent = {
   name: 'Planner Agent',
@@ -11,10 +12,9 @@ export const plannerAgent = {
   // AI-powered schedule via backend (falls back to null on failure)
   async generateAISchedule(subjects) {
     try {
-      const res = await fetch(`${API_BASE}/api/planner/generate`, {
+      const res = await apiFetch('/api/planner/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subjects }),
+        body: { subjects },
       });
       const data = await res.json();
       if (data.fallback || !res.ok || !Array.isArray(data.tasks)) return null;
@@ -41,11 +41,11 @@ export const plannerAgent = {
       const d = new Date(today);
       d.setDate(d.getDate() + fromDay);
       for (let i = 0; i < 90; i++) {
-        const s = d.toISOString().split('T')[0];
+        const s = formatLocalDateKey(d);
         if ((dailyLoad[s] || 0) + hours <= MAX_DAILY_HOURS) return { date: d, dateStr: s };
         d.setDate(d.getDate() + 1);
       }
-      return { date: d, dateStr: d.toISOString().split('T')[0] };
+      return { date: d, dateStr: formatLocalDateKey(d) };
     };
 
     // Session duration: priority × difficulty matrix
@@ -108,7 +108,7 @@ export const plannerAgent = {
       const revisionDate = new Date(deadline);
       revisionDate.setDate(revisionDate.getDate() - 1);
       if (revisionDate >= today) {
-        const revDateStr = revisionDate.toISOString().split('T')[0];
+        const revDateStr = formatLocalDateKey(revisionDate);
         const revHours = Math.max(1, Math.ceil(hours * 0.75));
         claimDay(revDateStr, revHours);
         tasks.push({
@@ -183,10 +183,9 @@ export const plannerAgent = {
 
   async getInsights(subjects, studyPlan) {
     try {
-      const res = await fetch(`${API_BASE}/api/planner/insights`, {
+      const res = await apiFetch('/api/planner/insights', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subjects, studyPlan }),
+        body: { subjects, studyPlan },
       });
       if (!res.ok) return null;
       return await res.json();
@@ -232,7 +231,7 @@ export const plannerAgent = {
     for (let i = 0; i < 60; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = formatLocalDateKey(d);
       const dayTasks = tasks.filter(t => t.date === dateStr);
 
       if (dayTasks.length === 0) {
@@ -259,7 +258,7 @@ export const plannerAgent = {
   },
 
   getDailyPlan(tasks, date) {
-    const dateStr = typeof date === 'string' ? date : date.toISOString().split('T')[0];
+    const dateStr = typeof date === 'string' ? date : formatLocalDateKey(date);
     return tasks.filter(t => t.date === dateStr);
   },
 
@@ -271,7 +270,7 @@ export const plannerAgent = {
     for (let i = 0; i < 7; i++) {
       const d = new Date(start);
       d.setDate(d.getDate() + i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = formatLocalDateKey(d);
       days.push({
         date: dateStr,
         label: d.toLocaleDateString('en-US', { weekday: 'short' }),

@@ -1,8 +1,8 @@
-import { createContext, useContext, useReducer, useEffect } from 'react';
+import { createContext, useContext, useReducer, useEffect, useRef, useState } from 'react';
+import { useAuth } from './AuthContext';
+import { API_ORIGIN, getAuthToken } from '../lib/api';
 
 const AppContext = createContext();
-
-const STORAGE_KEY = 'letsstudyai-data';
 
 const defaultState = {
   user: {
@@ -21,26 +21,17 @@ const defaultState = {
   notifications: [],
 };
 
-function loadState() {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return { ...defaultState, ...JSON.parse(stored) };
-  } catch (e) {
-    console.error('Failed to load state:', e);
-  }
-  return defaultState;
-}
-
-function saveState(state) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.error('Failed to save state:', e);
-  }
-}
-
 function appReducer(state, action) {
   switch (action.type) {
+    case 'HYDRATE_STATE': {
+      const p = action.payload || {};
+      return {
+        ...defaultState,
+        ...p,
+        user: { ...defaultState.user, ...(p.user || {}) },
+      };
+    }
+
     case 'ADD_SUBJECT':
       return { ...state, subjects: [...state.subjects, action.payload] };
 
@@ -105,11 +96,85 @@ function appReducer(state, action) {
 }
 
 export function AppProvider({ children }) {
-  const [state, dispatch] = useReducer(appReducer, null, loadState);
+  const { token, loading: authLoading } = useAuth();
+  const [state, dispatch] = useReducer(appReducer, defaultState);
+  const [hydrated, setHydrated] = useState(false);
+  const saveTimer = useRef(null);
+  const hydratedTokenRef = useRef(null);
 
   useEffect(() => {
-    saveState(state);
-  }, [state]);
+    if (authLoading) return;
+
+    if (!token) {
+      dispatch({ type: 'HYDRATE_STATE', payload: defaultState });
+      setHydrated(true);
+      hydratedTokenRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    setHydrated(false);
+
+    (async () => {
+      const currentToken = getAuthToken();
+      try {
+        const res = await fetch(`${API_ORIGIN}/api/user/state`, {
+          headers: { Authorization: `Bearer ${currentToken}` },
+        });
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (res.ok && data.state) {
+          dispatch({ type: 'HYDRATE_STATE', payload: data.state });
+        } else {
+          dispatch({ type: 'HYDRATE_STATE', payload: defaultState });
+        }
+      } catch {
+        if (!cancelled) dispatch({ type: 'HYDRATE_STATE', payload: defaultState });
+      } finally {
+        if (!cancelled) {
+          hydratedTokenRef.current = currentToken;
+          setHydrated(true);
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [token, authLoading]);
+
+  useEffect(() => {
+    if (!token || !hydrated || authLoading) return;
+    if (hydratedTokenRef.current !== token) return;
+
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const t = getAuthToken();
+        if (!t) return;
+        await fetch(`${API_ORIGIN}/api/user/state`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${t}`,
+          },
+          body: JSON.stringify(state),
+        });
+      } catch (e) {
+        console.error('Failed to save state:', e);
+      }
+    }, 700);
+
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [state, token, hydrated, authLoading]);
+
+  if (authLoading || (token && !hydrated)) {
+    return (
+      <div className="auth-loading-screen">
+        <p>Loading your workspace…</p>
+      </div>
+    );
+  }
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

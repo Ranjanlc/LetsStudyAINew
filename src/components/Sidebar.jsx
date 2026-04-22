@@ -1,10 +1,12 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import {
   HiOutlineHome, HiOutlineCalendar, HiOutlineAcademicCap,
   HiOutlineClipboardCheck, HiOutlineUser, HiOutlineDocumentText,
   HiOutlineBookOpen, HiOutlineMoon, HiOutlineSun,
+  HiOutlineLogout,
 } from 'react-icons/hi';
 
 const navItems = [
@@ -19,6 +21,13 @@ const navItems = [
 export default function Sidebar() {
   const { state } = useApp();
   const { theme, toggleTheme } = useTheme();
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    logout();
+    navigate('/login', { replace: true });
+  }
 
   const initials = (state.user.name || 'S')
     .split(' ')
@@ -63,6 +72,12 @@ export default function Sidebar() {
           }
           <span>{isLight ? 'Dark Mode' : 'Light Mode'}</span>
           <span className="theme-pill">{isLight ? 'Dark' : 'Light'}</span>
+        </button>
+
+        <div className="nav-section-title" style={{ marginTop: 12 }}>Account</div>
+        <button type="button" className="nav-item theme-toggle-btn" onClick={handleLogout}>
+          <HiOutlineLogout className="nav-icon" />
+          <span>Log out</span>
         </button>
       </nav>
 

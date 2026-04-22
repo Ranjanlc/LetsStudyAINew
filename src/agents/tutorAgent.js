@@ -1,3 +1,5 @@
+import { apiFetch } from '../lib/api';
+
 // Tutor Agent — Explains concepts and answers student questions
 
 const knowledgeBase = {
@@ -241,8 +243,6 @@ const knowledgeBase = {
   },
 };
 
-const API_BASE = 'http://localhost:3001/api';
-
 export const tutorAgent = {
   name: 'Tutor Agent',
   description: 'Explains concepts in a simple, interactive way and answers student questions.',
@@ -268,10 +268,9 @@ export const tutorAgent = {
       .slice(-12)
       .map(m => ({ role: m.role, content: m.text || m.content || '' }));
 
-    const res = await fetch(`${API_BASE}/chat`, {
+    const res = await apiFetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, conversationHistory: history }),
+      body: { message, conversationHistory: history },
     });
 
     const data = await res.json();

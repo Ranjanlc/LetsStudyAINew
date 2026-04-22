@@ -25,11 +25,11 @@ function buildRAGPrompt(userMessage, retrievedChunks) {
   return `The student has uploaded study notes. Here is relevant content from their notes:\n\n${contextBlock}\n\n---\n\nStudent's question: ${userMessage}\n\nPlease answer based on the provided notes context. If the notes don't fully cover the question, supplement with your general knowledge.`;
 }
 
-async function getRagContext(query) {
-  const totalChunks = getTotalChunks();
+async function getRagContext(query, userId) {
+  const totalChunks = getTotalChunks(userId);
   if (totalChunks === 0) return { chunks: [], hasContext: false };
 
-  const chunks = search(query, 5);
+  const chunks = search(userId, query, 5);
   return { chunks, hasContext: chunks.length > 0 };
 }
 

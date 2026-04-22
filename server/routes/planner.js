@@ -1,7 +1,10 @@
 const express = require('express');
 const Groq = require('groq-sdk');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
+
+router.use(requireAuth);
 
 let groq = null;
 

@@ -3,14 +3,16 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { parseDocument } = require('../rag/documentParser');
-const { addChunks, removeDocument, getDocumentList } = require('../rag/vectorStore');
+const { addChunks, removeDocument } = require('../rag/vectorStore');
+const { getPool } = require('../db/pool');
+const { requireAuth } = require('../middleware/auth');
+const { ensureUserDocumentsIndexed } = require('../services/documentIndex');
 
 const router = express.Router();
 
-// Store uploaded files in server/uploads/
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '..', 'uploads');
+    const uploadDir = path.join(__dirname, '..', 'uploads', req.user.id);
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
     cb(null, uploadDir);
   },
@@ -22,7 +24,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB max
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.docx', '.doc', '.txt', '.md'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -34,8 +36,7 @@ const upload = multer({
   },
 });
 
-// In-memory registry of uploaded docs (survives restart via re-parse if needed)
-const docRegistry = new Map(); // docId -> { id, name, filePath, uploadedAt, wordCount, chunks }
+router.use(requireAuth);
 
 // POST /api/documents/upload
 router.post('/upload', upload.single('document'), async (req, res) => {
@@ -46,22 +47,20 @@ router.post('/upload', upload.single('document'), async (req, res) => {
   const docId = `doc-${Date.now()}`;
   const originalName = req.file.originalname;
   const filePath = req.file.path;
+  const pool = getPool();
 
   try {
     const { chunks, wordCount } = await parseDocument(filePath, originalName);
 
-    addChunks(docId, originalName, chunks);
+    addChunks(req.user.id, docId, originalName, chunks);
 
-    const docInfo = {
-      id: docId,
-      name: originalName,
-      filePath,
-      uploadedAt: new Date().toISOString(),
-      wordCount,
-      chunkCount: chunks.length,
-    };
-    docRegistry.set(docId, docInfo);
+    await pool.query(
+      `INSERT INTO user_documents (id, user_id, name, file_path, word_count, chunk_count)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [docId, req.user.id, originalName, filePath, wordCount, chunks.length],
+    );
 
+    const uploadedAt = new Date().toISOString();
     res.json({
       success: true,
       document: {
@@ -69,44 +68,47 @@ router.post('/upload', upload.single('document'), async (req, res) => {
         name: originalName,
         wordCount,
         chunkCount: chunks.length,
-        uploadedAt: docInfo.uploadedAt,
+        uploadedAt,
       },
     });
   } catch (err) {
-    // Clean up uploaded file on parse error
     fs.unlink(filePath, () => {});
     res.status(422).json({ error: err.message || 'Failed to process the document.' });
   }
 });
 
 // GET /api/documents
-router.get('/', (req, res) => {
-  const docs = Array.from(docRegistry.values()).map(d => ({
-    id: d.id,
-    name: d.name,
-    wordCount: d.wordCount,
-    chunkCount: d.chunkCount,
-    uploadedAt: d.uploadedAt,
-  }));
-  res.json({ documents: docs });
+router.get('/', async (req, res) => {
+  await ensureUserDocumentsIndexed(req.user.id);
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT id, name, word_count AS "wordCount", chunk_count AS "chunkCount", uploaded_at AS "uploadedAt"
+     FROM user_documents WHERE user_id = $1 ORDER BY uploaded_at DESC`,
+    [req.user.id],
+  );
+  res.json({ documents: rows });
 });
 
 // DELETE /api/documents/:id
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   const { id } = req.params;
-  const doc = docRegistry.get(id);
+  const pool = getPool();
 
-  if (!doc) {
+  const { rows } = await pool.query(
+    'SELECT file_path FROM user_documents WHERE id = $1 AND user_id = $2',
+    [id, req.user.id],
+  );
+
+  if (rows.length === 0) {
     return res.status(404).json({ error: 'Document not found.' });
   }
 
-  // Remove from vector store and registry
-  removeDocument(id);
-  docRegistry.delete(id);
+  const filePath = rows[0].file_path;
+  removeDocument(req.user.id, id);
+  await pool.query('DELETE FROM user_documents WHERE id = $1 AND user_id = $2', [id, req.user.id]);
 
-  // Delete uploaded file
-  if (doc.filePath && fs.existsSync(doc.filePath)) {
-    fs.unlink(doc.filePath, () => {});
+  if (filePath && fs.existsSync(filePath)) {
+    fs.unlink(filePath, () => {});
   }
 
   res.json({ success: true, id });

@@ -1,4 +1,5 @@
 import { useApp } from '../context/AppContext';
+import { formatLocalDateKey } from '../utils/dateUtils';
 import { Link } from 'react-router-dom';
 import { HiOutlineBookOpen, HiOutlineClock, HiOutlineLightningBolt, HiOutlineCheckCircle, HiOutlineCalendar, HiOutlineAcademicCap, HiOutlineClipboardCheck, HiOutlineArrowRight, HiOutlineTrendingUp } from 'react-icons/hi';
 import { motion } from 'framer-motion';
@@ -34,7 +35,7 @@ export default function Dashboard() {
     ? Math.round(state.quizHistory.reduce((s, q) => s + q.percentage, 0) / totalQuizzes)
     : 0;
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = formatLocalDateKey();
   const todayTasks = state.studyPlan.filter(t => t.date === todayStr);
   const upcomingTasks = state.studyPlan
     .filter(t => !t.completed && t.date >= todayStr)

@@ -6,8 +6,7 @@ import {
   HiOutlineLightningBolt, HiOutlineCheck, HiOutlineX, HiOutlineTrendingUp,
   HiOutlineAcademicCap, HiOutlineClock, HiOutlineDocumentText, HiOutlineRefresh,
 } from 'react-icons/hi';
-
-const BACKEND = 'http://localhost:3001';
+import { apiFetch } from '../lib/api';
 
 export default function Evaluator() {
   const { state, dispatch } = useApp();
@@ -38,7 +37,7 @@ export default function Evaluator() {
 
   // Fetch uploaded documents for the doc-based quiz picker
   useEffect(() => {
-    fetch(`${BACKEND}/api/documents`)
+    apiFetch('/api/documents')
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.documents) setDocuments(data.documents); })
       .catch(() => {});
@@ -73,14 +72,13 @@ export default function Evaluator() {
     setIsGenerating(true);
     setGenError('');
     try {
-      const res = await fetch(`${BACKEND}/api/chat/generate-quiz`, {
+      const res = await apiFetch('/api/chat/generate-quiz', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           documentId: selectedDoc,
           focusTopic: focusTopic.trim() || undefined,
           numQuestions: numDocQuestions,
-        }),
+        },
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to generate quiz');

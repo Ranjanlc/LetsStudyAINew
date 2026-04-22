@@ -1,9 +1,14 @@
-// In-memory vector store using TF-IDF cosine similarity
-// No external API or database needed — perfect for a student project
+// Per-user in-memory TF-IDF vectors (chunks rebuilt from DB + disk on demand)
 
-const documents = []; // { id, docId, docName, text, tfidf }
+const userChunkArrays = new Map(); // userId -> Array<{ id, docId, docName, text, tfidf }>
 
-// Build a TF-IDF vector from text
+function getUserChunks(userId) {
+  if (!userChunkArrays.has(userId)) {
+    userChunkArrays.set(userId, []);
+  }
+  return userChunkArrays.get(userId);
+}
+
 function buildTFIDF(text, globalIDF) {
   const tokens = tokenize(text);
   const tf = computeTF(tokens);
@@ -37,7 +42,9 @@ function computeTF(tokens) {
 
 function cosineSimilarity(vecA, vecB) {
   const keys = new Set([...Object.keys(vecA), ...Object.keys(vecB)]);
-  let dot = 0, normA = 0, normB = 0;
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
 
   for (const key of keys) {
     const a = vecA[key] || 0;
@@ -51,8 +58,7 @@ function cosineSimilarity(vecA, vecB) {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-// Recompute IDF across all stored chunks
-function computeGlobalIDF() {
+function computeGlobalIDF(documents) {
   const N = documents.length || 1;
   const df = {};
 
@@ -68,23 +74,20 @@ function computeGlobalIDF() {
   return idf;
 }
 
-// Rebuild all TF-IDF vectors when documents change
-function rebuildVectors() {
-  const idf = computeGlobalIDF();
+function rebuildVectorsForUser(userId) {
+  const documents = getUserChunks(userId);
+  const idf = computeGlobalIDF(documents);
   documents.forEach(doc => {
     doc.tfidf = buildTFIDF(doc.text, idf);
   });
   return idf;
 }
 
-let globalIDF = {};
-
-function addChunks(docId, docName, chunks) {
-  // Remove old chunks for this doc if re-uploading
-  removeDocument(docId);
-
+function addChunks(userId, docId, docName, chunks) {
+  removeDocument(userId, docId);
+  const arr = getUserChunks(userId);
   chunks.forEach((text, idx) => {
-    documents.push({
+    arr.push({
       id: `${docId}-chunk-${idx}`,
       docId,
       docName,
@@ -92,27 +95,26 @@ function addChunks(docId, docName, chunks) {
       tfidf: {},
     });
   });
-
-  globalIDF = rebuildVectors();
+  rebuildVectorsForUser(userId);
 }
 
-function removeDocument(docId) {
-  const before = documents.length;
-  const indices = [];
-  for (let i = documents.length - 1; i >= 0; i--) {
-    if (documents[i].docId === docId) indices.push(i);
+function removeDocument(userId, docId) {
+  const arr = getUserChunks(userId);
+  const before = arr.length;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].docId === docId) arr.splice(i, 1);
   }
-  indices.forEach(i => documents.splice(i, 1));
-
-  if (documents.length !== before) {
-    globalIDF = rebuildVectors();
+  if (arr.length !== before) {
+    rebuildVectorsForUser(userId);
   }
 }
 
-function search(query, topK = 5) {
+function search(userId, query, topK = 5) {
+  const documents = getUserChunks(userId);
   if (documents.length === 0) return [];
 
-  const queryVec = buildTFIDF(query, globalIDF);
+  const idf = computeGlobalIDF(documents);
+  const queryVec = buildTFIDF(query, idf);
 
   const scored = documents.map(doc => ({
     ...doc,
@@ -126,38 +128,49 @@ function search(query, topK = 5) {
     .map(({ id, docId, docName, text, score }) => ({ id, docId, docName, text, score }));
 }
 
-function getDocumentList() {
+function getDocumentList(userId) {
+  const documents = getUserChunks(userId);
   const seen = new Set();
   const list = [];
   documents.forEach(d => {
     if (!seen.has(d.docId)) {
       seen.add(d.docId);
-      list.push({ id: d.docId, name: d.docName, chunks: documents.filter(c => c.docId === d.docId).length });
+      list.push({
+        id: d.docId,
+        name: d.docName,
+        chunks: documents.filter(c => c.docId === d.docId).length,
+      });
     }
   });
   return list;
 }
 
-function getTotalChunks() {
-  return documents.length;
+function getTotalChunks(userId) {
+  return getUserChunks(userId).length;
 }
 
-// Return all text chunks for a specific document (used for document-based quiz generation)
-function getDocumentChunks(docId) {
-  return documents
+function getDocumentChunks(userId, docId) {
+  return getUserChunks(userId)
     .filter(d => d.docId === docId)
-    .map(({ id, docId, docName, text }) => ({ id, docId, docName, text }));
+    .map(({ id, docId: dId, docName, text }) => ({ id, docId: dId, docName, text }));
 }
 
 const STOPWORDS = new Set([
-  'the','is','are','was','were','be','been','being','have','has','had','do','does','did',
-  'will','would','could','should','may','might','shall','can','need','dare','ought','used',
-  'a','an','and','or','but','in','on','at','to','for','of','with','by','from','up','about',
-  'into','through','during','before','after','above','below','between','each','this','that',
-  'these','those','than','then','so','yet','both','neither','nor','not','just','also',
-  'its','our','your','their','my','his','her','we','you','they','it','he','she','who','what',
-  'which','when','where','why','how','all','some','any','few','more','most','other','such',
-  'no','only','own','same','too','very','here','there','as','if','while','although',
+  'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+  'will', 'would', 'could', 'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought', 'used',
+  'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'up', 'about',
+  'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'each', 'this', 'that',
+  'these', 'those', 'than', 'then', 'so', 'yet', 'both', 'neither', 'nor', 'not', 'just', 'also',
+  'its', 'our', 'your', 'their', 'my', 'his', 'her', 'we', 'you', 'they', 'it', 'he', 'she', 'who', 'what',
+  'which', 'when', 'where', 'why', 'how', 'all', 'some', 'any', 'few', 'more', 'most', 'other', 'such',
+  'no', 'only', 'own', 'same', 'too', 'very', 'here', 'there', 'as', 'if', 'while', 'although',
 ]);
 
-module.exports = { addChunks, removeDocument, search, getDocumentList, getTotalChunks, getDocumentChunks };
+module.exports = {
+  addChunks,
+  removeDocument,
+  search,
+  getDocumentList,
+  getTotalChunks,
+  getDocumentChunks,
+};
