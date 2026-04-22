@@ -109,8 +109,11 @@ function removeDocument(userId, docId) {
   }
 }
 
-function search(userId, query, topK = 5) {
-  const documents = getUserChunks(userId);
+function search(userId, query, topK = 5, documentId = null) {
+  const userDocuments = getUserChunks(userId);
+  const documents = documentId
+    ? userDocuments.filter(d => d.docId === documentId)
+    : userDocuments;
   if (documents.length === 0) return [];
 
   const idf = computeGlobalIDF(documents);
@@ -145,8 +148,9 @@ function getDocumentList(userId) {
   return list;
 }
 
-function getTotalChunks(userId) {
-  return getUserChunks(userId).length;
+function getTotalChunks(userId, documentId = null) {
+  if (!documentId) return getUserChunks(userId).length;
+  return getUserChunks(userId).filter(d => d.docId === documentId).length;
 }
 
 function getDocumentChunks(userId, docId) {

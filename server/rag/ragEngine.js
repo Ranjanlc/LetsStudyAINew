@@ -5,13 +5,12 @@ const SYSTEM_PROMPT = `You are an intelligent AI study tutor called "LetsStudy A
 
 When answering questions:
 - Be clear, concise, and educational
-- If context from the student's notes is provided, base your answer on that context first
-- Use simple language with examples where helpful
-- Break down complex concepts step by step
-- If the question is about something not in the provided context, answer from your general knowledge and mention that
+- Use ONLY the context from the student's uploaded notes
+- Do NOT use outside/general knowledge
+- If the notes do not contain enough information, explicitly say: "I cannot answer that based on your uploaded documents."
+- Use simple language and structure your response clearly
 - Format your response with clear structure (use bullet points, numbered lists, or headers when appropriate)
-- Keep responses focused and not overly long
-- Encourage the student when appropriate`;
+- Keep responses focused and not overly long`;
 
 function buildRAGPrompt(userMessage, retrievedChunks) {
   if (retrievedChunks.length === 0) {
@@ -22,14 +21,14 @@ function buildRAGPrompt(userMessage, retrievedChunks) {
     .map((chunk, i) => `[From: ${chunk.docName}]\n${chunk.text}`)
     .join('\n\n---\n\n');
 
-  return `The student has uploaded study notes. Here is relevant content from their notes:\n\n${contextBlock}\n\n---\n\nStudent's question: ${userMessage}\n\nPlease answer based on the provided notes context. If the notes don't fully cover the question, supplement with your general knowledge.`;
+  return `The student has uploaded study notes. Here is relevant content from their notes:\n\n${contextBlock}\n\n---\n\nStudent's question: ${userMessage}\n\nAnswer ONLY from the provided notes context. If the context is insufficient, respond exactly with: "I cannot answer that based on your uploaded documents."`;
 }
 
-async function getRagContext(query, userId) {
-  const totalChunks = getTotalChunks(userId);
+async function getRagContext(query, userId, documentId = null) {
+  const totalChunks = getTotalChunks(userId, documentId);
   if (totalChunks === 0) return { chunks: [], hasContext: false };
 
-  const chunks = search(userId, query, 5);
+  const chunks = search(userId, query, 5, documentId);
   return { chunks, hasContext: chunks.length > 0 };
 }
 

@@ -24,7 +24,7 @@ router.use(requireAuth);
 
 // POST /api/chat
 router.post('/', async (req, res) => {
-  const { message, conversationHistory = [] } = req.body;
+  const { message, conversationHistory = [], documentId } = req.body;
 
   if (!message || typeof message !== 'string' || !message.trim()) {
     return res.status(400).json({ error: 'Message is required.' });
@@ -40,7 +40,25 @@ router.post('/', async (req, res) => {
 
   try {
     await ensureUserDocumentsIndexed(req.user.id);
-    const { chunks, hasContext } = await getRagContext(message.trim(), req.user.id);
+    if (documentId) {
+      const owns = await userOwnsDocument(req.user.id, documentId);
+      if (!owns) {
+        return res.status(404).json({ error: 'Selected document not found.' });
+      }
+    }
+
+    let { chunks, hasContext } = await getRagContext(message.trim(), req.user.id, documentId || null);
+
+    // If a specific document is selected but query-term retrieval is too strict,
+    // fall back to sending chunks from that selected document so requests like
+    // "summarize my notes" still have document context.
+    if (documentId && !hasContext) {
+      const selectedDocChunks = getDocumentChunks(req.user.id, documentId);
+      if (selectedDocChunks.length > 0) {
+        chunks = selectedDocChunks.slice(0, 8);
+        hasContext = true;
+      }
+    }
 
     const messages = buildMessages(conversationHistory, message.trim(), chunks);
 

@@ -1,32 +1,29 @@
-import { useState, useRef, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
-import { tutorAgent } from '../agents/tutorAgent';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useRef, useEffect } from "react";
+import { useApp } from "../context/AppContext";
+import { tutorAgent } from "../agents/tutorAgent";
+import { motion } from "framer-motion";
 import {
-  HiOutlinePaperAirplane, HiOutlineTrash, HiOutlineBookOpen,
-  HiOutlineLightBulb, HiOutlineChevronRight, HiOutlineSparkles,
-  HiOutlineDatabase, HiOutlineExclamationCircle,
-} from 'react-icons/hi';
-import { apiFetch, API_ORIGIN } from '../lib/api';
+  HiOutlinePaperAirplane,
+  HiOutlineTrash,
+  HiOutlineSparkles,
+  HiOutlineExclamationCircle,
+  HiOutlineAcademicCap,
+} from "react-icons/hi";
+import { apiFetch, API_ORIGIN } from "../lib/api";
 
 export default function Tutor() {
   const { state, dispatch } = useApp();
-  const [message, setMessage] = useState('');
-  const [activeTab, setActiveTab] = useState('chat');
-  const [selectedSubject, setSelectedSubject] = useState(null);
-  const [selectedTopic, setSelectedTopic] = useState(null);
+  const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [aiMode, setAiMode] = useState(true); // true = use Groq API, false = offline fallback
-  const [backendStatus, setBackendStatus] = useState(null); // null | { groqConfigured, docCount }
+  const [backendStatus, setBackendStatus] = useState(null); // null | { groqConfigured, docCount, model }
+  const [documents, setDocuments] = useState([]);
+  const [selectedDocId, setSelectedDocId] = useState("");
   const chatEndRef = useRef(null);
 
-  const subjects = tutorAgent.getSubjects();
-
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [state.chatHistory, isLoading]);
 
-  // Check backend health on mount
   useEffect(() => {
     checkBackend();
   }, []);
@@ -35,74 +32,85 @@ export default function Tutor() {
     try {
       const [healthRes, docsRes] = await Promise.all([
         fetch(`${API_ORIGIN}/api/health`),
-        apiFetch('/api/documents'),
+        apiFetch("/api/documents"),
       ]);
       const health = await healthRes.json();
       const docs = docsRes.ok ? await docsRes.json() : { documents: [] };
+      const docList = docs.documents || [];
+      setDocuments(docList);
+      setSelectedDocId((prev) => {
+        if (prev && docList.some((d) => d.id === prev)) return prev;
+        return docList[0]?.id || "";
+      });
       setBackendStatus({
         groqConfigured: health.groqConfigured,
-        docCount: docs.documents?.length || 0,
+        docCount: docList.length,
         model: health.model,
       });
     } catch {
       setBackendStatus(null);
-      setAiMode(false); // Auto-switch to offline if backend is down
+      setDocuments([]);
+      setSelectedDocId("");
     }
   }
 
   const handleSend = async (e) => {
     e.preventDefault();
     if (!message.trim() || isLoading) return;
+    if (!selectedDocId) {
+      dispatch({
+        type: "ADD_CHAT_MESSAGE",
+        payload: {
+          id: Date.now() + 1,
+          role: "assistant",
+          text: "Please select a document first. This tutor only answers from the selected document.",
+          type: "error",
+          time: new Date().toISOString(),
+        },
+      });
+      return;
+    }
 
     const userMsg = message.trim();
     dispatch({
-      type: 'ADD_CHAT_MESSAGE',
-      payload: { id: Date.now(), role: 'user', text: userMsg, time: new Date().toISOString() },
+      type: "ADD_CHAT_MESSAGE",
+      payload: {
+        id: Date.now(),
+        role: "user",
+        text: userMsg,
+        time: new Date().toISOString(),
+      },
     });
-    setMessage('');
+    setMessage("");
     setIsLoading(true);
 
     try {
-      if (aiMode && backendStatus !== null) {
-        // Use real AI via backend
-        const response = await tutorAgent.getChatResponseAI(userMsg, state.chatHistory);
-        dispatch({
-          type: 'ADD_CHAT_MESSAGE',
-          payload: {
-            id: Date.now() + 1,
-            role: 'assistant',
-            text: response.text,
-            type: response.type,
-            hasContext: response.hasContext,
-            sources: response.sources,
-            model: response.model,
-            time: new Date().toISOString(),
-          },
-        });
-      } else {
-        // Offline fallback — hardcoded knowledge base
-        await new Promise(r => setTimeout(r, 400 + Math.random() * 400));
-        const response = tutorAgent.getChatResponse(userMsg, state.chatHistory);
-        dispatch({
-          type: 'ADD_CHAT_MESSAGE',
-          payload: {
-            id: Date.now() + 1,
-            role: 'assistant',
-            text: response.text,
-            type: response.type,
-            offline: true,
-            time: new Date().toISOString(),
-          },
-        });
-      }
-    } catch (err) {
+      const response = await tutorAgent.getChatResponseAI(
+        userMsg,
+        state.chatHistory,
+        selectedDocId,
+      );
       dispatch({
-        type: 'ADD_CHAT_MESSAGE',
+        type: "ADD_CHAT_MESSAGE",
         payload: {
           id: Date.now() + 1,
-          role: 'assistant',
-          text: `**Error:** ${err.message || 'Something went wrong. Please try again.'}`,
-          type: 'error',
+          role: "assistant",
+          text: response.text,
+          type: response.type,
+          hasContext: response.hasContext,
+          sources: response.sources,
+          model: response.model,
+          time: new Date().toISOString(),
+        },
+      });
+    } catch (err) {
+      dispatch({
+        type: "ADD_CHAT_MESSAGE",
+        payload: {
+          id: Date.now() + 1,
+          role: "assistant",
+          text: `**Error:** ${err.message || "Something went wrong. Please try again."}`,
+          type: "error",
           time: new Date().toISOString(),
         },
       });
@@ -111,280 +119,180 @@ export default function Tutor() {
     }
   };
 
-  const handleTopicClick = (subject, topic) => {
-    setSelectedSubject(subject);
-    setSelectedTopic(topic);
-    setActiveTab('explore');
-  };
-
   const handleSuggestionClick = (s) => {
     setMessage(s);
-    setTimeout(() => document.querySelector('.chat-input')?.focus(), 0);
+    setTimeout(() => document.querySelector(".chat-input")?.focus(), 0);
   };
-
-  const explanation = selectedSubject && selectedTopic
-    ? tutorAgent.getExplanation(selectedSubject, selectedTopic)
-    : null;
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>
       <div className="page-header">
         <h1>Tutor Agent</h1>
-        <p className="subtitle">Learn concepts interactively, ask questions, and explore topics</p>
+        <p className="subtitle">Strict document-only tutor. Answers come only from your uploaded notes.</p>
       </div>
 
-      {/* AI Mode toggle bar */}
-      <div className="card" style={{ marginBottom: 20, padding: '12px 18px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 36, height: 20, borderRadius: 10,
-              background: aiMode && backendStatus ? 'var(--accent-primary)' : 'var(--border-color)',
-              position: 'relative', cursor: backendStatus ? 'pointer' : 'not-allowed',
-              transition: 'background 0.2s',
-            }} onClick={() => backendStatus && setAiMode(m => !m)}>
-              <div style={{
-                width: 14, height: 14, borderRadius: '50%', background: 'white',
-                position: 'absolute', top: 3,
-                left: aiMode && backendStatus ? 19 : 3,
-                transition: 'left 0.2s',
-              }} />
-            </div>
-            <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>
-              {aiMode && backendStatus ? (
-                <><HiOutlineSparkles style={{ verticalAlign: 'middle', color: 'var(--accent-primary)', marginRight: 4 }} />AI Mode (Groq + RAG)</>
-              ) : (
-                <><HiOutlineDatabase style={{ verticalAlign: 'middle', opacity: 0.5, marginRight: 4 }} />Offline Mode</>
-              )}
+      <div className="card" style={{ marginBottom: 20, padding: "12px 18px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <HiOutlineSparkles style={{ color: "var(--accent-primary)" }} />
+            <span style={{ fontWeight: 600, fontSize: "0.88rem" }}>
+              Document-only Mode (RAG)
             </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem' }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.78rem" }}>
             {backendStatus === null && (
-              <span style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <HiOutlineExclamationCircle /> Server offline — using built-in knowledge base
+              <span style={{ color: "#ef4444", display: "flex", alignItems: "center", gap: 4 }}>
+                <HiOutlineExclamationCircle /> Backend unavailable
               </span>
             )}
             {backendStatus && !backendStatus.groqConfigured && (
-              <span style={{ color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <HiOutlineExclamationCircle /> API key missing — add GROQ_API_KEY to server/.env
+              <span style={{ color: "#f59e0b", display: "flex", alignItems: "center", gap: 4 }}>
+                <HiOutlineExclamationCircle /> GROQ_API_KEY missing in server/.env
               </span>
             )}
             {backendStatus?.groqConfigured && (
-              <span style={{ color: 'var(--accent-success)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                ✓ {backendStatus.model} &nbsp;·&nbsp; {backendStatus.docCount} document{backendStatus.docCount !== 1 ? 's' : ''} indexed
+              <span style={{ color: "var(--accent-success)", display: "flex", alignItems: "center", gap: 4 }}>
+                ✓ {backendStatus.model} · {backendStatus.docCount} document{backendStatus.docCount !== 1 ? "s" : ""} indexed
               </span>
             )}
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="tabs">
-        <button className={`tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
-          Chat
-        </button>
-        <button className={`tab ${activeTab === 'browse' ? 'active' : ''}`} onClick={() => setActiveTab('browse')}>
-          Browse Topics
-        </button>
-        <button className={`tab ${activeTab === 'explore' ? 'active' : ''}`} onClick={() => setActiveTab('explore')}>
-          Explore
-        </button>
+      <div className="card" style={{ marginBottom: 12, padding: "12px 18px" }}>
+        <label style={{ display: "block", fontSize: "0.82rem", marginBottom: 6, color: "var(--text-muted)" }}>
+          Active document for Tutor chat
+        </label>
+        <select
+          className="form-control"
+          value={selectedDocId}
+          onChange={(e) => setSelectedDocId(e.target.value)}
+          disabled={isLoading || documents.length === 0}
+        >
+          {documents.length === 0 ? (
+            <option value="">No documents available</option>
+          ) : (
+            documents.map((doc) => (
+              <option key={doc.id} value={doc.id}>
+                {doc.name}
+              </option>
+            ))
+          )}
+        </select>
       </div>
 
-      <AnimatePresence mode="wait">
-        {activeTab === 'chat' && (
-          <motion.div key="chat" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-            <div className="chat-container">
-              <div className="chat-messages">
-                {state.chatHistory.length === 0 && (
-                  <div className="chat-welcome">
-                    <div className="chat-welcome-icon"><HiOutlineAcademicCap /></div>
-                    <h3>Welcome to the AI Tutor!</h3>
-                    <p>
-                      {aiMode && backendStatus?.docCount > 0
-                        ? `I have access to ${backendStatus.docCount} of your documents. Ask me anything!`
-                        : 'Ask me about any topic. Upload your notes in the Documents page for personalized answers.'}
-                    </p>
-                    <div className="chat-suggestions">
-                      {['What is Algebra?', 'Explain Data Structures', 'Tell me about Genetics', "How does Newton's 2nd Law work?"].map(s => (
-                        <button key={s} className="chip" onClick={() => handleSuggestionClick(s)}>
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {state.chatHistory.map(msg => (
-                  <div key={msg.id} className={`chat-message ${msg.role}`}>
-                    <div className="chat-avatar">
-                      {msg.role === 'user' ? state.user.avatar : '🤖'}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="chat-bubble">
-                        <div className="chat-text" dangerouslySetInnerHTML={{ __html: formatMessage(msg.text) }} />
-                        <div className="chat-time">
-                          {new Date(msg.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                          {msg.model && <span style={{ marginLeft: 6, opacity: 0.7 }}>· {msg.model}</span>}
-                          {msg.offline && <span style={{ marginLeft: 6, opacity: 0.6 }}>· offline</span>}
-                        </div>
-                      </div>
-                      {/* Show RAG sources if available */}
-                      {msg.role === 'assistant' && msg.hasContext && msg.sources?.length > 0 && (
-                        <div className="sources-bar">
-                          <span style={{ fontWeight: 600, marginRight: 6 }}>Sources:</span>
-                          {msg.sources.map((s, i) => (
-                            <span key={i} className="source-chip" title={s.snippet}>📄 {s.docName}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+      <div className="chat-container">
+        <div className="chat-messages">
+          {state.chatHistory.length === 0 && (
+            <div className="chat-welcome">
+              <div className="chat-welcome-icon">
+                <HiOutlineAcademicCap />
+              </div>
+              <h3>Welcome to the Document Tutor</h3>
+              <p>
+                {backendStatus?.docCount > 0
+                  ? "Ask questions only from the selected document."
+                  : "Upload notes in Documents first. This tutor will not answer outside your uploaded content."}
+              </p>
+              <div className="chat-suggestions">
+                {[
+                  "Summarize the key ideas in my notes",
+                  "What does my document say about this topic?",
+                  "List the important definitions from my notes",
+                  "Create a concise revision summary from my uploaded notes",
+                ].map((s) => (
+                  <button key={s} className="chip" onClick={() => handleSuggestionClick(s)}>
+                    {s}
+                  </button>
                 ))}
+              </div>
+            </div>
+          )}
 
-                {/* Typing indicator */}
-                {isLoading && (
-                  <div className="chat-message assistant">
-                    <div className="chat-avatar">🤖</div>
-                    <div className="chat-bubble typing-bubble">
-                      <span /><span /><span />
-                    </div>
+          {state.chatHistory.map((msg) => (
+            <div key={msg.id} className={`chat-message ${msg.role}`}>
+              <div className="chat-avatar">{msg.role === "user" ? state.user.avatar : "🤖"}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="chat-bubble">
+                  <div className="chat-text" dangerouslySetInnerHTML={{ __html: formatMessage(msg.text) }} />
+                  <div className="chat-time">
+                    {new Date(msg.time).toLocaleTimeString("en-US", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                    {msg.model && <span style={{ marginLeft: 6, opacity: 0.7 }}>· {msg.model}</span>}
+                  </div>
+                </div>
+
+                {msg.role === "assistant" && msg.hasContext && msg.sources?.length > 0 && (
+                  <div className="sources-bar">
+                    <span style={{ fontWeight: 600, marginRight: 6 }}>Sources:</span>
+                    {msg.sources.map((s, i) => (
+                      <span key={i} className="source-chip" title={s.snippet}>
+                        📄 {s.docName}
+                      </span>
+                    ))}
                   </div>
                 )}
-
-                <div ref={chatEndRef} />
               </div>
-
-              <form className="chat-input-container" onSubmit={handleSend}>
-                <input
-                  type="text"
-                  className="chat-input"
-                  placeholder={aiMode && backendStatus ? 'Ask AI anything about your studies...' : 'Ask about any topic...'}
-                  value={message}
-                  onChange={e => setMessage(e.target.value)}
-                  disabled={isLoading}
-                />
-                <button type="submit" className="btn btn-primary btn-icon chat-send" disabled={!message.trim() || isLoading}>
-                  <HiOutlinePaperAirplane />
-                </button>
-              </form>
-
-              {state.chatHistory.length > 0 && (
-                <button
-                  className="btn btn-secondary btn-sm"
-                  style={{ marginTop: '8px' }}
-                  onClick={() => dispatch({ type: 'CLEAR_CHAT' })}
-                >
-                  <HiOutlineTrash /> Clear Chat
-                </button>
-              )}
             </div>
-          </motion.div>
-        )}
+          ))}
 
-        {activeTab === 'browse' && (
-          <motion.div key="browse" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-            <div className="grid-auto">
-              {subjects.map(subject => {
-                const topics = tutorAgent.getTopics(subject);
-                const subjectEmojis = {
-                  Mathematics: '📐', Science: '🔬', 'Computer Science': '💻',
-                  Physics: '⚡', Chemistry: '🧪', Biology: '🧬',
-                };
-                return (
-                  <div key={subject} className="card" style={{ cursor: 'default' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-                      <span style={{ fontSize: '1.8rem' }}>{subjectEmojis[subject] || '📖'}</span>
-                      <h3 style={{ fontSize: '1.1rem' }}>{subject}</h3>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      {topics.map(topic => (
-                        <button
-                          key={topic}
-                          className="topic-button"
-                          onClick={() => handleTopicClick(subject, topic)}
-                        >
-                          <HiOutlineBookOpen style={{ flexShrink: 0, color: 'var(--accent-primary)' }} />
-                          <span>{topic}</span>
-                          <HiOutlineChevronRight style={{ marginLeft: 'auto', flexShrink: 0, opacity: 0.4 }} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+          {isLoading && (
+            <div className="chat-message assistant">
+              <div className="chat-avatar">🤖</div>
+              <div className="chat-bubble typing-bubble">
+                <span />
+                <span />
+                <span />
+              </div>
             </div>
-          </motion.div>
+          )}
+
+          <div ref={chatEndRef} />
+        </div>
+
+        <form className="chat-input-container" onSubmit={handleSend}>
+          <input
+            type="text"
+            className="chat-input"
+            placeholder={
+              selectedDocId
+                ? "Ask a question based only on the selected document..."
+                : "Select a document first..."
+            }
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            disabled={isLoading || !selectedDocId}
+          />
+          <button
+            type="submit"
+            className="btn btn-primary btn-icon chat-send"
+            disabled={!message.trim() || isLoading || !selectedDocId}
+          >
+            <HiOutlinePaperAirplane />
+          </button>
+        </form>
+
+        {state.chatHistory.length > 0 && (
+          <button
+            className="btn btn-secondary btn-sm"
+            style={{ marginTop: "8px" }}
+            onClick={() => dispatch({ type: "CLEAR_CHAT" })}
+          >
+            <HiOutlineTrash /> Clear Chat
+          </button>
         )}
-
-        {activeTab === 'explore' && (
-          <motion.div key="explore" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-            {!explanation ? (
-              <div className="empty-state">
-                <div className="emoji">🔍</div>
-                <h3>Select a topic to explore</h3>
-                <p>Go to "Browse Topics" and click on any topic to see detailed explanations.</p>
-              </div>
-            ) : (
-              <div className="explanation-view">
-                <div className="card" style={{ marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                    <span>{selectedSubject}</span>
-                    <HiOutlineChevronRight />
-                    <span style={{ color: 'var(--accent-primary)' }}>{selectedTopic}</span>
-                  </div>
-                  <h2 style={{ fontSize: '1.5rem', marginBottom: '16px' }}>{selectedTopic}</h2>
-                  <p style={{ color: 'var(--text-secondary)', lineHeight: 1.7, fontSize: '0.95rem' }}>
-                    {explanation.summary}
-                  </p>
-                </div>
-
-                <div className="grid-2" style={{ alignItems: 'start' }}>
-                  <div className="card">
-                    <div className="section-title"><HiOutlineLightBulb className="icon" /> Key Points</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      {explanation.keyPoints.map((point, i) => (
-                        <div key={i} style={{
-                          display: 'flex', alignItems: 'flex-start', gap: '10px',
-                          padding: '12px', background: 'var(--bg-glass)',
-                          border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)',
-                        }}>
-                          <span style={{
-                            width: '22px', height: '22px', borderRadius: '50%',
-                            background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: '0.7rem', fontWeight: 700, flexShrink: 0, color: 'white',
-                          }}>{i + 1}</span>
-                          <span style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{point}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="card">
-                    <div className="section-title">📝 Examples</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {explanation.examples.map((ex, i) => (
-                        <div key={i} style={{
-                          padding: '16px', background: 'var(--bg-glass)',
-                          border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)',
-                        }}>
-                          <div style={{ fontWeight: 600, fontSize: '0.88rem', marginBottom: '8px', color: 'var(--accent-secondary)' }}>
-                            Q: {ex.problem}
-                          </div>
-                          <div style={{ fontSize: '0.85rem', color: 'var(--accent-success)' }}>
-                            A: {ex.solution}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      </div>
 
       <style>{`
         .chat-container {
@@ -512,42 +420,30 @@ export default function Tutor() {
         .chat-input::placeholder { color: var(--text-muted); }
         .chat-input:disabled { opacity: 0.6; }
         .chat-send { width: 46px; height: 46px; border-radius: var(--radius-md); font-size: 1.1rem; }
-
-        .topic-button {
-          display: flex; align-items: center; gap: 10px;
-          padding: 10px 14px; background: var(--bg-glass);
-          border: 1px solid var(--border-light); border-radius: var(--radius-md);
-          color: var(--text-secondary); cursor: pointer;
-          transition: all var(--transition-normal);
-          font-family: var(--font-body); font-size: 0.85rem;
-          text-align: left; width: 100%;
-        }
-        .topic-button:hover {
-          background: var(--bg-secondary);
-          border-color: var(--accent-primary);
-          color: var(--text-primary);
-        }
       `}</style>
     </motion.div>
   );
 }
 
 function formatMessage(text) {
-  if (!text) return '';
+  if (!text) return "";
   return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/## (.*?)$/gm, '<h2>$1</h2>')
-    .replace(/### (.*?)$/gm, '<h3>$1</h3>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/^- (.*?)$/gm, '<li>$1</li>')
-    .replace(/^• (.*?)$/gm, '<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-    .replace(/\n{2,}/g, '</p><p>')
-    .replace(/\n/g, '<br/>')
-    .replace(/`(.*?)`/g, '<code style="background:var(--bg-glass);padding:1px 5px;border-radius:4px;font-family:monospace;font-size:0.85em">$1</code>')
-    .replace(/<\/h[23]><br\/>/g, '</h2>')
-    .replace(/<\/li><br\/>/g, '</li>');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/## (.*?)$/gm, "<h2>$1</h2>")
+    .replace(/### (.*?)$/gm, "<h3>$1</h3>")
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.*?)\*/g, "<em>$1</em>")
+    .replace(/^- (.*?)$/gm, "<li>$1</li>")
+    .replace(/^• (.*?)$/gm, "<li>$1</li>")
+    .replace(/(<li>.*<\/li>)/gs, "<ul>$1</ul>")
+    .replace(/\n{2,}/g, "</p><p>")
+    .replace(/\n/g, "<br/>")
+    .replace(
+      /`(.*?)`/g,
+      '<code style="background:var(--bg-glass);padding:1px 5px;border-radius:4px;font-family:monospace;font-size:0.85em">$1</code>',
+    )
+    .replace(/<\/h[23]><br\/>/g, "</h2>")
+    .replace(/<\/li><br\/>/g, "</li>");
 }
