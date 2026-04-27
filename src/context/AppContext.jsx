@@ -53,9 +53,25 @@ function appReducer(state, action) {
   switch (action.type) {
     case 'HYDRATE_STATE': {
       const p = action.payload || {};
+      // Migrate older persisted topicMastery (which used the topic's
+      // original casing as the key) to the normalized lowercased key
+      // shape. This keeps Planner chip lookups & Tutor remediation
+      // working for users who were on the previous schema.
+      const rawMastery = p.topicMastery || {};
+      const normalizedMastery = {};
+      for (const [k, v] of Object.entries(rawMastery)) {
+        if (!v) continue;
+        const key = String(k).trim().toLowerCase();
+        if (!key) continue;
+        normalizedMastery[key] = {
+          ...v,
+          displayTopic: v.displayTopic || k,
+        };
+      }
       return {
         ...defaultState,
         ...p,
+        topicMastery: normalizedMastery,
         user: { ...defaultState.user, ...(p.user || {}) },
       };
     }
@@ -168,42 +184,56 @@ function appReducer(state, action) {
       const overallPct = Number.isFinite(Number(p.percentage))
         ? Math.round(Number(p.percentage))
         : null;
-      const primaryTopic = String(p.topic || '').trim().toLowerCase();
+      const primaryKey = String(p.topic || '').trim().toLowerCase();
       const singleTopicQuiz = breakdown.length === 1;
+      const quizDocIds = Array.isArray(p.documentIds) ? p.documentIds.filter(Boolean) : [];
 
+      // topicMastery is keyed by the lowercased topic so every consumer
+      // (Planner chip lookup, Tutor remediation, etc.) can match regardless
+      // of how the LLM cased the topic in the quiz response.
       const mastery = { ...(state.topicMastery || {}) };
       const newRemediations = [];
-      let masteredTopics = new Set();
+      const masteredKeys = new Set();
+      const resolvedKeys = new Set(); // mastered or "tracking" — no longer weak
 
       for (const item of breakdown) {
-        const topic = (item.topic || p.topic || '').trim();
-        if (!topic) continue;
-        const isPrimaryTopic = primaryTopic && topic.toLowerCase() === primaryTopic;
+        const display = (item.topic || p.topic || '').trim();
+        if (!display) continue;
+        const key = display.toLowerCase();
+        const isPrimary = primaryKey && key === primaryKey;
         const rawPct = item.percentage != null
           ? item.percentage
           : (item.total ? Math.round((item.correct / item.total) * 100) : p.percentage);
-        // Keep Tutor remediation score aligned with what the student sees in the
-        // quiz result card for single-topic quizzes (or the quiz's primary topic).
-        const pct = (singleTopicQuiz || isPrimaryTopic) && overallPct != null
+        // Keep Tutor remediation score aligned with what the student sees in
+        // the quiz result card for single-topic quizzes (or the quiz's
+        // primary topic for multi-topic quizzes).
+        const pct = (singleTopicQuiz || isPrimary) && overallPct != null
           ? overallPct
           : (Number.isFinite(Number(rawPct)) ? Math.round(Number(rawPct)) : 0);
-        const prev = mastery[topic] || { attempts: 0 };
+        const prev = mastery[key] || { attempts: 0 };
         const status = pct >= 80 ? 'mastered' : pct < 60 ? 'weak' : 'tracking';
-        mastery[topic] = {
+        // Latest score wins — we don't average. A single perfect attempt is
+        // enough to flip a topic to mastered, which is what the student
+        // intuitively expects.
+        mastery[key] = {
           status,
           score: pct,
+          displayTopic: display,
+          documentIds: quizDocIds.length > 0 ? quizDocIds : (prev.documentIds || []),
           attempts: (prev.attempts || 0) + 1,
           lastSubject: p.subject || prev.lastSubject || null,
           lastAttemptAt: completedAt,
         };
-        if (status === 'mastered') masteredTopics.add(topic.toLowerCase());
+        if (status === 'mastered') masteredKeys.add(key);
+        if (status !== 'weak') resolvedKeys.add(key);
         if (status === 'weak') {
           newRemediations.push({
-            id: `rem-${topic}-${Date.now()}`,
+            id: `rem-${key}-${Date.now()}`,
             kind: 'remediation',
-            topic,
+            topic: display,
             subject: p.subject || prev.lastSubject || null,
             score: pct,
+            documentIds: quizDocIds,
             createdAt: completedAt,
             read: false,
           });
@@ -214,16 +244,33 @@ function appReducer(state, action) {
       const studyPlan = state.studyPlan.map(t => {
         if (t.completed) return t;
         const tTopic = (t.topic || '').toLowerCase();
-        return masteredTopics.has(tTopic) ? { ...t, completed: true } : t;
+        return masteredKeys.has(tTopic) ? { ...t, completed: true } : t;
       });
 
-      // Dedupe remediation by topic — keep newest, drop older entries for same topic.
-      const remTopics = new Set(newRemediations.map(r => r.topic.toLowerCase()));
+      // Inbox bookkeeping: drop old remediation entries that are now
+      // superseded — either because the same topic just got resolved, OR
+      // because the latest quiz on the same source document(s) covered the
+      // material and any prior weak entry should be replaced. Without this,
+      // a student who retakes a quiz and aces it would still see the old
+      // "you got 20%" nag because the LLM picked a slightly different
+      // wording for the topic the second time around.
+      const supersededKeys = new Set([
+        ...newRemediations.map(r => r.topic.toLowerCase()),
+        ...resolvedKeys,
+      ]);
+      const quizDocSet = new Set(quizDocIds);
       const inbox = [
         ...newRemediations,
-        ...(state.agentInbox || []).filter(it =>
-          it.kind !== 'remediation' || !remTopics.has((it.topic || '').toLowerCase())
-        ),
+        ...(state.agentInbox || []).filter(it => {
+          if (it.kind !== 'remediation') return true;
+          const itTopic = (it.topic || '').trim().toLowerCase();
+          if (supersededKeys.has(itTopic)) return false;
+          // Same-document supersede: if this new outcome covered any of the
+          // documents an older remediation was about, drop the old one.
+          const itDocs = Array.isArray(it.documentIds) ? it.documentIds : [];
+          if (itDocs.length > 0 && itDocs.some(d => quizDocSet.has(d))) return false;
+          return true;
+        }),
       ].slice(0, 50);
 
       return { ...state, topicMastery: mastery, studyPlan, agentInbox: inbox };

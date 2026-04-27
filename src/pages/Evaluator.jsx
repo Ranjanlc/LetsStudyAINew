@@ -8,6 +8,7 @@ import {
 } from 'react-icons/hi';
 import { apiFetch } from '../lib/api';
 import DocumentContextPicker from '../components/DocumentContextPicker';
+import TodaysPlanStrip from '../components/TodaysPlanStrip';
 
 export default function Evaluator() {
   const { state, dispatch } = useApp();
@@ -84,6 +85,9 @@ export default function Evaluator() {
         topic: data.topic || focusTopic || (data.sourceDocs?.[0] ?? 'Document'),
         sourceDoc: data.sourceDoc,
         sourceDocs: data.sourceDocs || [],
+        // Stable document IDs — these flow into the remediation inbox so the
+        // Tutor can match by ID intersection (not by fuzzy topic strings).
+        documentIds: Array.isArray(activeDocumentIds) ? [...activeDocumentIds] : [],
         questions: data.questions,
         totalQuestions: data.questions.length,
         generatedAt: new Date().toISOString(),
@@ -117,6 +121,9 @@ export default function Evaluator() {
     // Baton pass: feed the outcome back to the rest of the app.
     // This updates topicMastery, marks any matching study tasks complete on
     // mastery, and queues a remediation suggestion for the Tutor on weak topics.
+    // documentIds are the source-of-truth for "scope" — the Tutor uses them
+    // to decide whether a remediation entry is relevant to the docs the
+    // student is currently viewing.
     dispatch({
       type: 'RECORD_QUIZ_OUTCOME',
       payload: {
@@ -124,6 +131,9 @@ export default function Evaluator() {
         topic: result.topic,
         percentage: result.percentage,
         topicBreakdown: result.topicBreakdown,
+        documentIds: Array.isArray(result.documentIds) && result.documentIds.length > 0
+          ? result.documentIds
+          : (Array.isArray(state.activeDocumentIds) ? state.activeDocumentIds : []),
         completedAt: result.completedAt,
       },
     });
@@ -512,8 +522,18 @@ function QuizSetup({
   numDocQuestions, setNumDocQuestions,
   onStartDoc, isGenerating, genError,
 }) {
+  // When a student clicks "Quiz this" on today's plan, jump straight into
+  // doc-quiz mode with the topic prefilled. This makes the Planner's
+  // contract with the Evaluator visible and one-click actionable.
+  const handlePickPlannerTask = (task /*, documentIds */) => {
+    setQuizSource('document');
+    if (task && task.topic) setFocusTopic(task.topic);
+  };
+
   return (
     <div className="quiz-setup">
+      <TodaysPlanStrip actionLabel="Quiz this" onPick={handlePickPlannerTask} />
+
       {quizSource === 'document' && (
         <DocumentContextPicker title="Quiz context — choose documents" />
       )}

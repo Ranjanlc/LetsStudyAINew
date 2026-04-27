@@ -188,6 +188,9 @@ export const evaluatorAgent = {
       topic: quiz.topic,
       sourceDoc: quiz.sourceDoc || (quiz.sourceDocs?.[0] ?? null),
       sourceDocs: quiz.sourceDocs || (quiz.sourceDoc ? [quiz.sourceDoc] : []),
+      // Carry the originating document IDs through so the cross-agent
+      // feedback loop can scope remediation to a stable identifier.
+      documentIds: Array.isArray(quiz.documentIds) ? [...quiz.documentIds] : [],
       score,
       totalQuestions: quiz.questions.length,
       percentage,

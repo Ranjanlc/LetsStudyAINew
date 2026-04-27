@@ -762,10 +762,27 @@ function TodayTaskRow({ task, dispatch }) {
 
 function SubjectCard({ subject, dispatch, progress, topicMastery = {}, learningObjectives = {} }) {
   // Surface cross-agent signals so the user can see how each topic is doing.
+  // topicMastery is keyed by lowercased topic name (see RECORD_QUIZ_OUTCOME),
+  // BUT the LLM that generated the quiz may have picked a slightly different
+  // wording than the Planner's typed topic name (e.g. chapter "ML" vs quiz
+  // topic "Machine Learning Basics"). So we do exact-then-substring lookup
+  // and pick the most recent attempt as a tiebreaker.
   function topicState(name) {
-    const m = topicMastery[name] || topicMastery[String(name).trim()];
-    if (!m) return null;
-    return m.status; // 'mastered' | 'weak' | 'tracking'
+    if (!name) return null;
+    const k = String(name).trim().toLowerCase();
+    if (!k) return null;
+    const exact = topicMastery[k];
+    if (exact) return exact.status;
+    let best = null;
+    for (const [mk, mv] of Object.entries(topicMastery || {})) {
+      if (!mv) continue;
+      if (mk.includes(k) || k.includes(mk)) {
+        if (!best || (mv.lastAttemptAt && mv.lastAttemptAt > best.lastAttemptAt)) {
+          best = mv;
+        }
+      }
+    }
+    return best ? best.status : null;
   }
   function topicHasObjectives(name) {
     if (!name) return false;

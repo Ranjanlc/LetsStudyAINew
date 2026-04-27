@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useApp } from "../context/AppContext";
 import { tutorAgent } from "../agents/tutorAgent";
 import { motion } from "framer-motion";
@@ -11,6 +11,7 @@ import {
 } from "react-icons/hi";
 import { API_ORIGIN } from "../lib/api";
 import DocumentContextPicker from "../components/DocumentContextPicker";
+import TodaysPlanStrip from "../components/TodaysPlanStrip";
 
 export default function Tutor() {
   const { state, dispatch } = useApp();
@@ -22,10 +23,55 @@ export default function Tutor() {
   const activeIds = state.activeDocumentIds;
   const hasActiveDocs = activeIds.length > 0;
 
-  // Cross-agent inbox — pending remediation suggestions from the Evaluator.
-  const pendingRemediation = (state.agentInbox || []).filter(
+  // Names of chapters that contain at least one currently-selected document.
+  // Used as a fallback when a remediation entry has no documentIds attached
+  // (e.g. older quizzes from before we started tracking that).
+  const activeChapterNames = useMemo(() => {
+    const names = new Set();
+    if (!hasActiveDocs) return names;
+    const idSet = new Set(activeIds);
+    for (const subj of state.library || []) {
+      for (const ch of subj.chapters || []) {
+        const inScope = (ch.documents || []).some(d => idSet.has(d.id));
+        if (inScope && ch.name) names.add(String(ch.name).trim().toLowerCase());
+      }
+    }
+    return names;
+  }, [activeIds, hasActiveDocs, state.library]);
+
+  function isRemediationInScope(rem) {
+    if (!hasActiveDocs) return false;
+    // Primary signal: the remediation is in scope if the student has
+    // selected any of the actual documents the failed quiz was based on.
+    // This is the most reliable check — it ties scope to a stable ID
+    // instead of fuzzy topic strings.
+    const remDocs = Array.isArray(rem.documentIds) ? rem.documentIds : [];
+    if (remDocs.length > 0) {
+      const idSet = new Set(activeIds);
+      if (remDocs.some(d => idSet.has(d))) return true;
+      return false;
+    }
+    // Fallback for legacy entries with no documentIds: match by chapter
+    // name vs the remediation's topic string (case-insensitive substring).
+    const t = String(rem.topic || '').trim().toLowerCase();
+    if (!t) return false;
+    if (activeChapterNames.has(t)) return true;
+    for (const name of activeChapterNames) {
+      if (name.includes(t) || t.includes(name)) return true;
+    }
+    return false;
+  }
+
+  // All unread remediation items, regardless of scope. We always show
+  // *something* when there are pending items — students should never be
+  // left wondering whether the Evaluator's signal got through.
+  const allUnreadRemediation = (state.agentInbox || []).filter(
     it => it.kind === 'remediation' && !it.read
   );
+  // Items that are relevant to the current document selection — these are
+  // the ones we show "Deep-dive" buttons for and trigger the proactive
+  // greeting on.
+  const pendingRemediation = allUnreadRemediation.filter(isRemediationInScope);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -35,12 +81,16 @@ export default function Tutor() {
     checkBackend();
   }, []);
 
-  // Smart Remediation: when the user lands on the Tutor and has unread
-  // remediation suggestions from the Evaluator, surface a proactive greeting.
-  // We keep it lightweight — one assistant message offering a deep-dive on the
-  // weakest topic — and mark all related items as read so it isn't shown again.
+  // Smart Remediation: surface a proactive greeting once the student has
+  // selected a document whose chapter actually matches a weak quiz topic.
+  // We use a ref instead of [] deps so the greeting fires lazily when the
+  // student finally picks a relevant document — but still only fires once
+  // per Tutor session, not on every re-render.
+  const remediationGreetedRef = useRef(false);
   useEffect(() => {
+    if (remediationGreetedRef.current) return;
     if (state.chatHistory.length > 0) return;
+    if (!hasActiveDocs) return;
     if (pendingRemediation.length === 0) return;
 
     const weakest = [...pendingRemediation].sort((a, b) => (a.score || 0) - (b.score || 0))[0];
@@ -71,9 +121,8 @@ export default function Tutor() {
     for (const r of pendingRemediation) {
       dispatch({ type: 'MARK_INBOX_READ', payload: r.id });
     }
-    // Run only once per "fresh" tutor session.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    remediationGreetedRef.current = true;
+  }, [pendingRemediation, hasActiveDocs, state.chatHistory.length, dispatch]);
 
   async function checkBackend() {
     try {
@@ -202,11 +251,17 @@ export default function Tutor() {
         </div>
       </div>
 
+      <TodaysPlanStrip actionLabel="Study this" />
+
       <DocumentContextPicker title="Tutor context — choose documents" />
 
       {/* Cross-agent suggestion strip — surfaces weak topics the Evaluator
-          flagged so the user can jump straight into remediation. */}
-      {pendingRemediation.length > 0 && (
+          flagged. The strip always appears while there are unread items, so
+          students always see *that* a remediation is pending. The
+          "Deep-dive" buttons only appear for topics whose source docs are
+          currently selected, and an inline hint nudges the student to open
+          the relevant document otherwise. */}
+      {allUnreadRemediation.length > 0 && (
         <div
           className="card"
           style={{
@@ -225,20 +280,29 @@ export default function Tutor() {
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', flex: 1, minWidth: 200 }}>
             The Evaluator flagged these topics as weak:&nbsp;
             <strong style={{ color: 'var(--accent-danger)' }}>
-              {pendingRemediation.slice(0, 3).map(r => r.topic).join(', ')}
+              {allUnreadRemediation.slice(0, 3).map(r => `${r.topic} (${r.score}%)`).join(', ')}
             </strong>
+            {pendingRemediation.length === 0 && (
+              <div style={{ marginTop: 4, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                {hasActiveDocs
+                  ? 'Select the document(s) the failed quiz was generated from to start a deep-dive.'
+                  : 'Select the relevant document in the picker above to start a deep-dive.'}
+              </div>
+            )}
           </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {pendingRemediation.slice(0, 3).map(r => (
-              <button
-                key={r.id}
-                className="btn btn-secondary btn-sm"
-                onClick={() => setMessage(`Give me a focused deep dive on ${r.topic}, with examples I can practice.`)}
-              >
-                Deep-dive: {r.topic}
-              </button>
-            ))}
-          </div>
+          {pendingRemediation.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {pendingRemediation.slice(0, 3).map(r => (
+                <button
+                  key={r.id}
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setMessage(`Give me a focused deep dive on ${r.topic}, with examples I can practice.`)}
+                >
+                  Deep-dive: {r.topic}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
