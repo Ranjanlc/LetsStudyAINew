@@ -14,4 +14,8 @@ module.exports = {
   quizHistory: [],
   currentQuiz: null,
   notifications: [],
+  // Shared cross-agent context (see src/context/AppContext.jsx for details)
+  topicMastery: {},
+  learningObjectives: {},
+  agentInbox: [],
 };

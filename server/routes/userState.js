@@ -5,7 +5,12 @@ const defaultAppState = require('../defaultAppState');
 
 const router = express.Router();
 
-const STATE_KEYS = ['user', 'subjects', 'studyPlan', 'chatHistory', 'quizHistory', 'currentQuiz', 'notifications'];
+const STATE_KEYS = [
+  'user', 'subjects', 'studyPlan', 'chatHistory', 'quizHistory',
+  'currentQuiz', 'notifications',
+  // Shared cross-agent context — these flow back so other endpoints can read them.
+  'topicMastery', 'learningObjectives', 'agentInbox',
+];
 
 function mergeWithDefaults(raw) {
   const base = typeof raw === 'object' && raw !== null ? raw : {};

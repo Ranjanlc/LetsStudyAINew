@@ -24,16 +24,24 @@ function buildRAGPrompt(userMessage, retrievedChunks) {
   return `The student has uploaded study notes. Here is relevant content from their notes:\n\n${contextBlock}\n\n---\n\nStudent's question: ${userMessage}\n\nAnswer ONLY from the provided notes context. If the context is insufficient, respond exactly with: "I cannot answer that based on your uploaded documents."`;
 }
 
-async function getRagContext(query, userId, documentId = null) {
-  const totalChunks = getTotalChunks(userId, documentId);
+async function getRagContext(query, userId, documentIds = null) {
+  const totalChunks = getTotalChunks(userId, documentIds);
   if (totalChunks === 0) return { chunks: [], hasContext: false };
 
-  const chunks = search(userId, query, 5, documentId);
+  // Slightly more retrieved chunks when scoping across many documents.
+  const k = Array.isArray(documentIds) && documentIds.length > 1 ? 8 : 5;
+  const chunks = search(userId, query, k, documentIds);
   return { chunks, hasContext: chunks.length > 0 };
 }
 
-function buildMessages(conversationHistory, userMessage, retrievedChunks) {
+function buildMessages(conversationHistory, userMessage, retrievedChunks, options = {}) {
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
+
+  // Cross-agent "baton pass": shared roadmap context from the Planner & Evaluator.
+  // Injected as a second system message so it doesn't dilute RAG instructions.
+  if (options.briefing && typeof options.briefing === 'string' && options.briefing.trim()) {
+    messages.push({ role: 'system', content: options.briefing.trim() });
+  }
 
   // Include last 6 turns of conversation for context (keep token usage manageable)
   const recentHistory = conversationHistory.slice(-12);

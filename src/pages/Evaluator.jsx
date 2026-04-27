@@ -7,6 +7,7 @@ import {
   HiOutlineAcademicCap, HiOutlineClock, HiOutlineDocumentText, HiOutlineRefresh,
 } from 'react-icons/hi';
 import { apiFetch } from '../lib/api';
+import DocumentContextPicker from '../components/DocumentContextPicker';
 
 export default function Evaluator() {
   const { state, dispatch } = useApp();
@@ -17,8 +18,6 @@ export default function Evaluator() {
 
   // Document-based quiz state
   const [quizSource, setQuizSource] = useState('topic'); // 'topic' | 'document'
-  const [documents, setDocuments] = useState([]);
-  const [selectedDoc, setSelectedDoc] = useState('');
   const [focusTopic, setFocusTopic] = useState('');
   const [numDocQuestions, setNumDocQuestions] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -35,13 +34,8 @@ export default function Evaluator() {
   const topics = quizConfig.subject ? evaluatorAgent.getTopics(quizConfig.subject) : [];
   const report = evaluatorAgent.getPerformanceReport(state.quizHistory);
 
-  // Fetch uploaded documents for the doc-based quiz picker
-  useEffect(() => {
-    apiFetch('/api/documents')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.documents) setDocuments(data.documents); })
-      .catch(() => {});
-  }, []);
+  const activeDocumentIds = state.activeDocumentIds;
+  const hasActiveDocs = activeDocumentIds.length > 0;
 
   // Timer
   useEffect(() => {
@@ -66,16 +60,16 @@ export default function Evaluator() {
     setTimerActive(true);
   };
 
-  // Start quiz from uploaded document via AI
+  // Start quiz from uploaded documents via AI (multi-document context)
   const startDocumentQuiz = async () => {
-    if (!selectedDoc) return;
+    if (!hasActiveDocs) return;
     setIsGenerating(true);
     setGenError('');
     try {
       const res = await apiFetch('/api/chat/generate-quiz', {
         method: 'POST',
         body: {
-          documentId: selectedDoc,
+          documentIds: activeDocumentIds,
           focusTopic: focusTopic.trim() || undefined,
           numQuestions: numDocQuestions,
         },
@@ -87,8 +81,9 @@ export default function Evaluator() {
       const quiz = {
         id: `doc-${Date.now()}`,
         subject: data.subject || 'Document Quiz',
-        topic: data.topic || focusTopic || documents.find(d => d.id === selectedDoc)?.name || 'Document',
+        topic: data.topic || focusTopic || (data.sourceDocs?.[0] ?? 'Document'),
         sourceDoc: data.sourceDoc,
+        sourceDocs: data.sourceDocs || [],
         questions: data.questions,
         totalQuestions: data.questions.length,
         generatedAt: new Date().toISOString(),
@@ -105,8 +100,12 @@ export default function Evaluator() {
     }
   };
 
+  // Phase 5: lock the question on first answer (no changing afterwards) — answers state is treated
+  // as final once set for that index.
   const handleAnswer = (questionIdx, answerIdx) =>
-    setAnswers(prev => ({ ...prev, [questionIdx]: answerIdx }));
+    setAnswers(prev => prev[questionIdx] !== undefined
+      ? prev
+      : { ...prev, [questionIdx]: answerIdx });
 
   const handleSubmitQuiz = useCallback(() => {
     if (!state.currentQuiz) return;
@@ -114,6 +113,20 @@ export default function Evaluator() {
     const result = evaluatorAgent.evaluateQuiz(state.currentQuiz, answers);
     setQuizResult(result);
     dispatch({ type: 'ADD_QUIZ_RESULT', payload: result });
+
+    // Baton pass: feed the outcome back to the rest of the app.
+    // This updates topicMastery, marks any matching study tasks complete on
+    // mastery, and queues a remediation suggestion for the Tutor on weak topics.
+    dispatch({
+      type: 'RECORD_QUIZ_OUTCOME',
+      payload: {
+        subject: result.subject,
+        topic: result.topic,
+        percentage: result.percentage,
+        topicBreakdown: result.topicBreakdown,
+        completedAt: result.completedAt,
+      },
+    });
   }, [state.currentQuiz, answers, dispatch]);
 
   const resetQuiz = () => {
@@ -156,9 +169,8 @@ export default function Evaluator() {
                 subjects={subjects}
                 topics={topics}
                 onStartTopic={startTopicQuiz}
-                documents={documents}
-                selectedDoc={selectedDoc}
-                setSelectedDoc={setSelectedDoc}
+                hasActiveDocs={hasActiveDocs}
+                activeCount={activeDocumentIds.length}
                 focusTopic={focusTopic}
                 setFocusTopic={setFocusTopic}
                 numDocQuestions={numDocQuestions}
@@ -296,6 +308,40 @@ export default function Evaluator() {
           background: rgba(255,75,110,0.1);
           color: var(--text-primary);
         }
+        .option.correct {
+          border-color: var(--accent-success);
+          background: rgba(0,230,118,0.12);
+          color: var(--text-primary);
+          cursor: default;
+        }
+        .option.incorrect {
+          border-color: var(--accent-danger);
+          background: rgba(255,75,110,0.12);
+          color: var(--text-primary);
+          cursor: default;
+        }
+        .option.locked {
+          opacity: 0.55;
+          cursor: default;
+        }
+        .option:disabled {
+          cursor: default;
+        }
+        .option:disabled:hover {
+          border-color: var(--border-color);
+          background: var(--bg-glass);
+          color: var(--text-secondary);
+        }
+        .option.correct:hover, .option.correct:disabled:hover {
+          border-color: var(--accent-success);
+          background: rgba(0,230,118,0.12);
+          color: var(--text-primary);
+        }
+        .option.incorrect:hover, .option.incorrect:disabled:hover {
+          border-color: var(--accent-danger);
+          background: rgba(255,75,110,0.12);
+          color: var(--text-primary);
+        }
         .option-letter {
           width: 30px;
           height: 30px;
@@ -311,6 +357,14 @@ export default function Evaluator() {
         }
         .option.selected .option-letter {
           background: var(--accent-primary);
+          color: white;
+        }
+        .option.correct .option-letter {
+          background: var(--accent-success);
+          color: white;
+        }
+        .option.incorrect .option-letter {
+          background: var(--accent-danger);
           color: white;
         }
         .question-nav {
@@ -453,15 +507,16 @@ export default function Evaluator() {
 function QuizSetup({
   quizSource, setQuizSource,
   config, setConfig, subjects, topics, onStartTopic,
-  documents, selectedDoc, setSelectedDoc,
+  hasActiveDocs, activeCount,
   focusTopic, setFocusTopic,
   numDocQuestions, setNumDocQuestions,
   onStartDoc, isGenerating, genError,
 }) {
-  const selectedDocName = documents.find(d => d.id === selectedDoc)?.name || '';
-
   return (
     <div className="quiz-setup">
+      {quizSource === 'document' && (
+        <DocumentContextPicker title="Quiz context — choose documents" />
+      )}
       <div className="quiz-card">
         <h2>Start a Quiz</h2>
         <p className="subtitle">Choose a source for your quiz questions</p>
@@ -534,100 +589,83 @@ function QuizSetup({
           </>
         ) : (
           <>
-            {documents.length === 0 ? (
+            {!hasActiveDocs ? (
               <div style={{
-                textAlign: 'center', padding: '32px 20px',
+                textAlign: 'center', padding: '24px 20px',
                 background: 'var(--bg-glass)', borderRadius: 'var(--radius-lg)',
                 border: '1px dashed var(--border-color)', marginBottom: '20px',
               }}>
-                <HiOutlineDocumentText style={{ fontSize: '2.5rem', color: 'var(--text-muted)', marginBottom: 8 }} />
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 8 }}>
-                  No documents uploaded yet.
+                <HiOutlineDocumentText style={{ fontSize: '2rem', color: 'var(--text-muted)', marginBottom: 8 }} />
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: 6 }}>
+                  Tick at least one document in the context picker above.
                 </p>
-                <a href="/documents" className="btn btn-secondary btn-sm">Upload Documents</a>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: 8 }}>
+                  No documents yet? <a href="/documents" style={{ color: 'var(--accent-primary)' }}>Upload some</a>.
+                </p>
               </div>
             ) : (
-              <>
-                <div className="form-group">
-                  <label>Select Document</label>
-                  <select
-                    className="form-control"
-                    value={selectedDoc}
-                    onChange={e => setSelectedDoc(e.target.value)}
-                  >
-                    <option value="">Choose a document...</option>
-                    {documents.map(d => (
-                      <option key={d.id} value={d.id}>
-                        {d.name} ({d.chunks} chunks)
-                      </option>
-                    ))}
-                  </select>
-                  {selectedDocName && (
-                    <div style={{
-                      marginTop: 8, padding: '8px 12px',
-                      background: 'rgba(123,97,255,0.08)',
-                      border: '1px solid rgba(123,97,255,0.2)',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '0.78rem', color: 'var(--accent-primary)',
-                      display: 'flex', alignItems: 'center', gap: 6,
-                    }}>
-                      <HiOutlineDocumentText /> Questions will be generated from: <strong>{selectedDocName}</strong>
-                    </div>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label>Focus Topic <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none' }}>(optional — narrow down questions)</span></label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g. Chapter 3, Newton's Laws, Data Types..."
-                    value={focusTopic}
-                    onChange={e => setFocusTopic(e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Number of Questions</label>
-                  <select
-                    className="form-control"
-                    value={numDocQuestions}
-                    onChange={e => setNumDocQuestions(parseInt(e.target.value))}
-                  >
-                    <option value={3}>3 Questions</option>
-                    <option value={5}>5 Questions</option>
-                    <option value={8}>8 Questions</option>
-                    <option value={10}>10 Questions</option>
-                  </select>
-                </div>
-
-                {genError && (
-                  <div style={{
-                    padding: '12px 16px', marginBottom: 16,
-                    background: 'rgba(255,75,110,0.1)', border: '1px solid rgba(255,75,110,0.3)',
-                    borderRadius: 'var(--radius-md)', fontSize: '0.85rem', color: 'var(--accent-danger)',
-                  }}>
-                    {genError}
-                  </div>
-                )}
-
-                <button
-                  className="btn btn-primary btn-lg"
-                  style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={onStartDoc}
-                  disabled={!selectedDoc || isGenerating}
-                >
-                  {isGenerating
-                    ? <><HiOutlineRefresh style={{ animation: 'spin 1s linear infinite' }} /> Generating from document...</>
-                    : <><HiOutlineLightningBolt /> Generate Quiz from Document</>
-                  }
-                </button>
-
-                <p style={{ textAlign: 'center', fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 12 }}>
-                  AI will read your uploaded document and create questions from it
-                </p>
-              </>
+              <div style={{
+                marginBottom: 16, padding: '8px 12px',
+                background: 'rgba(123,97,255,0.08)',
+                border: '1px solid rgba(123,97,255,0.2)',
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.8rem', color: 'var(--accent-primary)',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <HiOutlineDocumentText /> Questions will be generated from <strong>{activeCount} selected document{activeCount === 1 ? '' : 's'}</strong>.
+              </div>
             )}
+
+            <div className="form-group">
+              <label>Focus Topic <span style={{ color: 'var(--text-muted)', fontWeight: 400, textTransform: 'none' }}>(optional — narrow down questions)</span></label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. Chapter 3, Newton's Laws, Data Types..."
+                value={focusTopic}
+                onChange={e => setFocusTopic(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Number of Questions</label>
+              <select
+                className="form-control"
+                value={numDocQuestions}
+                onChange={e => setNumDocQuestions(parseInt(e.target.value))}
+              >
+                <option value={3}>3 Questions</option>
+                <option value={5}>5 Questions</option>
+                <option value={8}>8 Questions</option>
+                <option value={10}>10 Questions</option>
+              </select>
+            </div>
+
+            {genError && (
+              <div style={{
+                padding: '12px 16px', marginBottom: 16,
+                background: 'rgba(255,75,110,0.1)', border: '1px solid rgba(255,75,110,0.3)',
+                borderRadius: 'var(--radius-md)', fontSize: '0.85rem', color: 'var(--accent-danger)',
+              }}>
+                {genError}
+              </div>
+            )}
+
+            <button
+              className="btn btn-primary btn-lg"
+              style={{ width: '100%', justifyContent: 'center' }}
+              onClick={onStartDoc}
+              disabled={!hasActiveDocs || isGenerating}
+            >
+              {isGenerating
+                ? <><HiOutlineRefresh style={{ animation: 'spin 1s linear infinite' }} /> Generating from documents...</>
+                : <><HiOutlineLightningBolt /> Generate Quiz from {activeCount > 1 ? `${activeCount} Documents` : 'Document'}</>
+              }
+            </button>
+
+            <p style={{ textAlign: 'center', fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 12 }}>
+              AI will read your selected documents and create questions from them
+            </p>
           </>
         )}
       </div>
@@ -680,6 +718,16 @@ function QuizInterface({ quiz, currentQuestion, setCurrentQuestion, answers, onA
   const allAnswered = Object.keys(answers).length === quiz.totalQuestions;
   const timerDanger = timeLeft < 30;
 
+  const userAnswer = answers[currentQuestion];
+  const isAnswered = userAnswer !== undefined;
+  const correctIdx = question.correct;
+  const isUserCorrect = isAnswered && userAnswer === correctIdx;
+  const explanation = question.explanation || '';
+
+  const sourceLabel = quiz.sourceDocs?.length
+    ? (quiz.sourceDocs.length === 1 ? quiz.sourceDocs[0] : `${quiz.sourceDocs.length} documents`)
+    : quiz.sourceDoc;
+
   return (
     <div style={{ maxWidth: '720px', margin: '0 auto' }}>
       {/* Progress */}
@@ -696,9 +744,9 @@ function QuizInterface({ quiz, currentQuestion, setCurrentQuestion, answers, onA
         <div className="question-header">
           <span className="question-number">
           Question {currentQuestion + 1} of {quiz.totalQuestions}
-          {quiz.sourceDoc && (
+          {sourceLabel && (
             <span style={{ marginLeft: 8, color: 'var(--accent-primary)', fontSize: '0.72rem', fontWeight: 600 }}>
-              · {quiz.sourceDoc}
+              · {sourceLabel}
             </span>
           )}
         </span>
@@ -716,19 +764,72 @@ function QuizInterface({ quiz, currentQuestion, setCurrentQuestion, answers, onA
         <div className="question-text">{question.question}</div>
 
         <div className="options">
-          {question.options.map((option, idx) => (
-            <button
-              key={idx}
-              className={`option ${answers[currentQuestion] === idx ? 'selected' : ''}`}
-              onClick={() => onAnswer(currentQuestion, idx)}
-            >
-              <span className="option-letter">
-                {String.fromCharCode(65 + idx)}
-              </span>
-              <span>{option}</span>
-            </button>
-          ))}
+          {question.options.map((option, idx) => {
+            // Phase 5 — visual states once the answer is locked.
+            const isCorrect = idx === correctIdx;
+            const isUserPick = userAnswer === idx;
+            let stateClass = '';
+            if (isAnswered) {
+              if (isCorrect) stateClass = 'correct';
+              else if (isUserPick) stateClass = 'incorrect';
+              else stateClass = 'locked';
+            } else if (isUserPick) {
+              stateClass = 'selected';
+            }
+            return (
+              <button
+                key={idx}
+                className={`option ${stateClass}`}
+                onClick={() => !isAnswered && onAnswer(currentQuestion, idx)}
+                disabled={isAnswered}
+                aria-pressed={isUserPick}
+              >
+                <span className="option-letter">
+                  {String.fromCharCode(65 + idx)}
+                </span>
+                <span style={{ flex: 1 }}>{option}</span>
+                {isAnswered && isCorrect && (
+                  <HiOutlineCheck style={{ color: 'var(--accent-success)', fontSize: '1.1rem', flexShrink: 0 }} />
+                )}
+                {isAnswered && !isCorrect && isUserPick && (
+                  <HiOutlineX style={{ color: 'var(--accent-danger)', fontSize: '1.1rem', flexShrink: 0 }} />
+                )}
+              </button>
+            );
+          })}
         </div>
+
+        {/* Real-time feedback panel (Phase 5) */}
+        {isAnswered && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            style={{
+              padding: '14px 16px',
+              borderRadius: 'var(--radius-md)',
+              border: `1px solid ${isUserCorrect ? 'rgba(0,230,118,0.35)' : 'rgba(255,75,110,0.35)'}`,
+              background: isUserCorrect ? 'rgba(0,230,118,0.08)' : 'rgba(255,75,110,0.08)',
+              marginBottom: 24,
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6,
+              fontWeight: 700, fontSize: '0.9rem',
+              color: isUserCorrect ? 'var(--accent-success)' : 'var(--accent-danger)',
+            }}>
+              {isUserCorrect ? <HiOutlineCheck /> : <HiOutlineX />}
+              {isUserCorrect ? 'Correct!' : 'Not quite.'}
+              {!isUserCorrect && (
+                <span style={{ fontWeight: 500, color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                  — Correct answer: <strong>{String.fromCharCode(65 + correctIdx)}. {question.options[correctIdx]}</strong>
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+              {explanation || 'No explanation provided for this question.'}
+            </div>
+          </motion.div>
+        )}
 
         <div className="question-nav">
           <button
@@ -804,11 +905,14 @@ function QuizResults({ result, onRetry }) {
         <div className="section-title">Detailed Results</div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {result.subject} → {result.topic} • {result.score}/{result.totalQuestions} correct
-          {result.sourceDoc && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--accent-primary)', background: 'rgba(123,97,255,0.1)', padding: '2px 8px', borderRadius: 99 }}>
-              <HiOutlineDocumentText style={{ fontSize: '0.85rem' }} /> {result.sourceDoc}
+          {(result.sourceDocs?.length ? result.sourceDocs : (result.sourceDoc ? [result.sourceDoc] : [])).map((name) => (
+            <span
+              key={name}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--accent-primary)', background: 'rgba(123,97,255,0.1)', padding: '2px 8px', borderRadius: 99 }}
+            >
+              <HiOutlineDocumentText style={{ fontSize: '0.85rem' }} /> {name}
             </span>
-          )}
+          ))}
         </div>
         <div className="result-details">
           {result.results.map((r, i) => (

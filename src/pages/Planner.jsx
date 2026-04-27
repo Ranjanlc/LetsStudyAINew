@@ -181,6 +181,15 @@ export default function Planner() {
       payload: { id: Date.now(), text: wasAI ? 'AI study plan generated!' : 'Study plan generated!', time: new Date().toISOString() },
     });
 
+    // Baton pass (Planner → Evaluator/Tutor): also derive learning objectives
+    // for each topic. These are persisted in shared context so the Evaluator
+    // can target them when generating quizzes and the Tutor can reference them.
+    plannerAgent.generateLearningObjectives(subjects).then(objectives => {
+      if (objectives && Object.keys(objectives).length > 0) {
+        dispatch({ type: 'MERGE_LEARNING_OBJECTIVES', payload: objectives });
+      }
+    }).catch(() => {});
+
     setInsightsLoading(true);
     const ai = await plannerAgent.getInsights(subjects, tasks);
     if (ai) setAiInsights(ai);
@@ -484,6 +493,8 @@ export default function Planner() {
                     subject={sub}
                     dispatch={dispatch}
                     progress={plannerAgent.getSubjectProgress(state.studyPlan, sub.id)}
+                    topicMastery={state.topicMastery}
+                    learningObjectives={state.learningObjectives}
                   />
                 ))}
               </div>
@@ -749,7 +760,18 @@ function TodayTaskRow({ task, dispatch }) {
   );
 }
 
-function SubjectCard({ subject, dispatch, progress }) {
+function SubjectCard({ subject, dispatch, progress, topicMastery = {}, learningObjectives = {} }) {
+  // Surface cross-agent signals so the user can see how each topic is doing.
+  function topicState(name) {
+    const m = topicMastery[name] || topicMastery[String(name).trim()];
+    if (!m) return null;
+    return m.status; // 'mastered' | 'weak' | 'tracking'
+  }
+  function topicHasObjectives(name) {
+    if (!name) return false;
+    const k = String(name).trim().toLowerCase();
+    return Boolean(learningObjectives[k]?.objectives?.length);
+  }
   const daysLeft = Math.ceil((new Date(subject.deadline) - new Date()) / (1000 * 60 * 60 * 24));
   const pc = PRIORITY_CONFIG[subject.priority] || PRIORITY_CONFIG.medium;
   const dc = DIFFICULTY_CONFIG[subject.difficulty] || DIFFICULTY_CONFIG.medium;
@@ -781,11 +803,38 @@ function SubjectCard({ subject, dispatch, progress }) {
           </button>
         </div>
 
-        {/* Topics */}
+        {/* Topics — annotated with quiz mastery + planner objectives */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '14px' }}>
-          {subject.topics.map(t => (
-            <span key={t} className="chip" style={{ fontSize: '0.7rem' }}>{t}</span>
-          ))}
+          {subject.topics.map(t => {
+            const status = topicState(t);
+            const hasObj = topicHasObjectives(t);
+            const palette = status === 'mastered'
+              ? { bg: 'rgba(0,230,118,0.12)', fg: 'var(--accent-success)', border: 'rgba(0,230,118,0.35)' }
+              : status === 'weak'
+                ? { bg: 'rgba(255,75,110,0.10)', fg: 'var(--accent-danger)', border: 'rgba(255,75,110,0.35)' }
+                : null;
+            return (
+              <span
+                key={t}
+                className="chip"
+                title={
+                  status === 'mastered' ? 'Quiz passed — looking strong!'
+                  : status === 'weak' ? 'Recent quiz showed gaps here. Tutor will offer remediation.'
+                  : hasObj ? 'Learning objectives defined by Planner.'
+                  : ''
+                }
+                style={{
+                  fontSize: '0.7rem',
+                  ...(palette ? { background: palette.bg, color: palette.fg, border: `1px solid ${palette.border}` } : {}),
+                }}
+              >
+                {status === 'mastered' && '✓ '}
+                {status === 'weak' && '⚠ '}
+                {t}
+                {hasObj && <span style={{ marginLeft: 4, opacity: 0.7 }}>·📋</span>}
+              </span>
+            );
+          })}
         </div>
 
         {/* Meta row */}

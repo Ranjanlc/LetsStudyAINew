@@ -1,32 +1,92 @@
-# LetsStudyAI — AI-Powered Study Assistant
+# LetsStudyAI
 
-This is our course project for CSCI 4083. We built an AI study assistant that uses multiple agents to help students plan their study schedule, understand topics, and test themselves — all powered by their own uploaded notes.
+Multi-agent, document-grounded study platform built for CSCI 4083.
 
-The big idea: upload your PDF or Word notes, and the AI will answer your questions from them, not just generic stuff.
+LetsStudyAI combines three collaborating agents:
+- **Planner** (roadmap + schedule + learning objectives)
+- **Tutor** (RAG chat over uploaded notes)
+- **Evaluator** (objective-aligned quizzes + mastery tracking)
 
----
-
-## What It Does
-
-The app has three AI agents, each doing a different job:
-
-- **Planner Agent** — you add your subjects and deadlines, it builds a study schedule for you
-- **Tutor Agent** — you ask it questions, it answers using your uploaded notes (RAG)
-- **Evaluator Agent** — it generates quiz questions either by topic or directly from your documents
-
-There's also a Documents page where you upload your notes (PDF, DOCX, or TXT) so the AI has something to work with.
+The latest infrastructure adds a full **Subject -> Chapter -> Slides (documents)** hierarchy and a **baton-pass architecture** where each agent contributes shared context to the others.
 
 ---
 
-## How to Run It
+## Key Features
 
-You need:
-- Docker Desktop (recommended for Postgres), or any Postgres server
-- Node.js + npm
-- Two terminals (backend + frontend)
+### 1) Hierarchical Knowledge Library
+- Relational structure: `subjects -> chapters -> user_documents`
+- Documents are always linked to a chapter
+- Upload and retrieval are scoped to authenticated user ownership
+- Documents page is Planner-driven (subjects/chapters are imported from Planner context)
 
-### Step 0 — Start PostgreSQL (Docker)
+### 2) Multi-Document RAG Context
+- Users can select multiple documents through a hierarchical context picker
+- Tutor and Evaluator send `documentIds[]` to backend (backward-compatible with single `documentId`)
+- RAG retrieval is filtered to selected documents only
 
+### 3) Baton-Pass Agent Interaction Pattern
+- **Planner -> Tutor**: roadmap briefing (focus subject, this week tasks, weak/mastered topics, objectives) injected as system context
+- **Planner -> Evaluator**: learning objectives briefing injected into quiz generation prompt
+- **Evaluator -> Planner/Tutor**: quiz outcomes update topic mastery, roadmap completion, and remediation inbox
+
+### 4) Shared Global Context
+Stored in `user_app_state.state` JSONB:
+- `learningObjectives`
+- `topicMastery`
+- `agentInbox`
+
+This enables persistent cross-agent memory per user.
+
+### 5) Real-Time Evaluator Feedback
+- Answers lock after selection
+- Correct/incorrect options are visually highlighted
+- Explanations are shown immediately
+- Final summary remains available after quiz completion
+
+---
+
+## Architecture Overview
+
+### Frontend
+- React + Vite
+- Global state with `AppContext` + reducer
+- Pages: `Planner`, `Documents`, `Tutor`, `Evaluator`
+- Shared `DocumentContextPicker` for active context selection
+
+### Backend
+- Node.js + Express
+- JWT-authenticated routes
+- PostgreSQL persistence
+- Groq LLM integration for planner/tutor/evaluator prompts
+- Custom TF-IDF based retrieval (`server/rag/*`)
+
+### Data Layer
+- `users`
+- `user_app_state` (JSONB for planner/tutor/evaluator shared context)
+- `subjects`
+- `chapters`
+- `user_documents`
+
+---
+
+## Model Configuration
+
+Current model assignments:
+- Planner generation: `qwen/qwen3-32b`
+- Evaluator quiz generation: `llama-3.3-70b-versatile`
+- Tutor chat: `meta-llama/llama-4-scout-17b-16e-instruct`
+
+---
+
+## Quick Start
+
+## 1. Prerequisites
+- Node.js 18+
+- npm
+- PostgreSQL (local or Docker)
+- Groq API key
+
+## 2. Start PostgreSQL (Docker example)
 ```bash
 docker run --name letsstudyai-pg \
   -e POSTGRES_PASSWORD=postgres \
@@ -35,105 +95,123 @@ docker run --name letsstudyai-pg \
   -d postgres:16
 ```
 
-If the container already exists, start it with:
-
+If already created:
 ```bash
 docker start letsstudyai-pg
 ```
 
-Optional quick DB check:
-
-```bash
-docker exec -it letsstudyai-pg psql -U postgres -d letsstudyai -c "\dt"
-```
-
-### Step 1 — Get a free Groq API key
-
-Go to [console.groq.com](https://console.groq.com) and create an API key.
-
-### Step 2 — Configure backend environment
-
+## 3. Configure backend env
 ```bash
 cd server
 cp .env.example .env
 ```
 
-Edit `server/.env` and set:
-- `DATABASE_URL` (example: `postgres://postgres:postgres@localhost:5432/letsstudyai`)
-- `JWT_SECRET` (random string, at least 16 chars)
-- `GROQ_API_KEY` (required for AI features)
+Set these in `server/.env`:
+- `DATABASE_URL=postgres://postgres:postgres@localhost:5432/letsstudyai`
+- `JWT_SECRET=<min-16-char-secret>`
+- `GROQ_API_KEY=<your-key>`
 
-### Step 3 — Start backend
-
+## 4. Install and run backend
 ```bash
 cd server
 npm install
 npm start
 ```
 
-Backend runs at `http://localhost:3001` and auto-creates DB tables on startup.
+Backend URL: `http://localhost:3001`
 
-### Step 4 — Start frontend (new terminal)
-
+## 5. Install and run frontend
 ```bash
 npm install
 npm run dev
 ```
 
-Frontend runs at `http://localhost:5173`.
-
-### Step 5 — First use
-
-1. Register a new account.
-2. Upload documents in **Documents** page.
-3. Use Tutor with the document selector (Tutor only answers from the selected document).
+Frontend URL: `http://localhost:5173`
 
 ---
 
-## Tech Stack
+## Typical User Flow (Updated)
 
-| Part | What we used |
-|------|-------------|
-| Frontend | React 19, Vite, Framer Motion |
-| Backend | Node.js, Express |
-| Accounts | JWT + bcrypt, PostgreSQL (`users`, `user_app_state`, `user_documents`) |
-| AI / LLM | Groq API (Llama 3) — free |
-| Document Search (RAG) | TF-IDF + cosine similarity |
-| File Parsing | pdf-parse (PDF), mammoth (DOCX) |
+1. Register / login
+2. In Planner, create subjects + topics and generate study roadmap
+3. In Documents, click **Import from Planner** and upload files to selected chapter
+4. In Tutor, select one or more documents and ask questions
+5. In Evaluator, generate quiz from active docs (and/or focus topic)
+6. Quiz results update:
+   - topic mastery
+   - remediation suggestions for Tutor
+   - roadmap progress (completed tasks)
 
-We chose Groq because it's fast and free. We built the RAG system from scratch using TF-IDF instead of using a vector database, which kept things simple and didn't require any extra services.
+---
 
-### Current Tutor behavior
+## API Surface (Core)
 
-- Tutor is **document-only** (no offline predefined knowledge mode)
-- You must pick an uploaded document in Tutor chat
-- The selected `documentId` is sent to backend and retrieval is scoped to that document only
+### Auth and state
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/user/state`
+- `PUT /api/user/state`
+
+### Library and documents
+- `GET /api/subjects`
+- `POST /api/subjects/sync-from-planner`
+- `POST /api/documents/upload` (requires `chapterId`)
+- `GET /api/documents?group=hierarchy`
+- `DELETE /api/documents/:id`
+
+### Planner
+- `POST /api/planner/generate`
+- `POST /api/planner/insights`
+- `POST /api/planner/objectives`
+
+### Tutor / Evaluator
+- `POST /api/chat` (supports `documentIds[]`)
+- `POST /api/chat/generate-quiz` (supports `documentIds[]`)
 
 ---
 
 ## Project Structure
 
-```
+```text
 LetsStudyAI/
-├── src/                    # React frontend
-│   ├── agents/             # Planner, Tutor, Evaluator agent logic
-│   ├── pages/              # Dashboard, Planner, Tutor, Evaluator, Documents, Profile
-│   └── context/            # App state (AppContext), Theme (ThemeContext)
-├── server/                 # Express backend
-│   ├── routes/             # chat.js, documents.js
-│   └── rag/                # documentParser.js, vectorStore.js, ragEngine.js
+├── src/
+│   ├── agents/
+│   ├── components/
+│   ├── context/
+│   ├── lib/
+│   └── pages/
+├── server/
+│   ├── db/
+│   ├── middleware/
+│   ├── rag/
+│   ├── routes/
+│   └── services/
+├── PROJECT_PLAN.md
+├── PROJECT_REPORT.md
 └── README.md
 ```
 
 ---
 
+## Verification Checklist
+
+Use this to validate the updated infrastructure quickly:
+- Documents page has no inline subject/chapter create/delete
+- Planner objectives are generated and persisted
+- Tutor receives planner briefing in chat requests
+- Evaluator prompt includes objectives/weak-topic briefing
+- Quiz result writes `topicMastery` and `agentInbox`
+- Tutor shows proactive remediation when weak topics exist
+- Planner chips reflect mastered/weak/objective states
+
+---
+
 ## Team
 
-| Name | Role |
-|------|------|
-| Pankaj Bhatta | Tutor Agent + RAG backend |
-| Ranjan Lamichhane | System design + integration |
-| Aadarsha Aryal | Planner Agent |
-| Diwakar Mahato Sudi | Evaluator Agent |
+- Pankaj Bhatta
+- Ranjan Lamichhane
+- Aadarsha Aryal
+- Diwakar Mahato Sudi
 
-**Course:** CSCI 4083 — Dr. Dileon Saint Jean
+**Course:** CSCI 4083  
+**Instructor:** Dr. Dileon Saint Jean

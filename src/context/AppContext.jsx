@@ -19,6 +19,34 @@ const defaultState = {
   quizHistory: [],
   currentQuiz: null,
   notifications: [],
+  // Document library hierarchy mirrored from /api/subjects
+  // Shape: [{ id, name, color, chapters: [{ id, name, documents: [...] }] }]
+  library: [],
+  // IDs of documents that are currently used as context for the Tutor & Evaluator
+  activeDocumentIds: [],
+
+  // ─── Shared cross-agent context ────────────────────────────────────────
+  // Per-topic mastery state, fed by Evaluator quiz outcomes and consumed by
+  // Tutor (remediation) and Planner (roadmap progress).
+  // Shape: { [topicName]: {
+  //   status: 'mastered' | 'weak' | 'tracking',
+  //   score: number,           // last percentage (0..100)
+  //   attempts: number,
+  //   lastSubject: string|null,
+  //   lastAttemptAt: ISOString,
+  // }}
+  topicMastery: {},
+
+  // Per-chapter/topic learning objectives produced by the Planner.
+  // Keyed by topic name (lowercased) so any agent can look them up.
+  // Shape: { [topicNameLower]: { topic: string, subject: string, objectives: string[] } }
+  learningObjectives: {},
+
+  // Cross-agent suggestion queue. Producers append items; consumers (e.g. Tutor)
+  // surface them and then mark them as `read` so they aren't shown twice.
+  // Item shape:
+  //   { id, kind: 'remediation', topic, subject, score, createdAt, read }
+  agentInbox: [],
 };
 
 function appReducer(state, action) {
@@ -86,6 +114,133 @@ function appReducer(state, action) {
 
     case 'CLEAR_NOTIFICATIONS':
       return { ...state, notifications: [] };
+
+    case 'SET_LIBRARY':
+      return { ...state, library: action.payload || [] };
+
+    case 'SET_ACTIVE_DOCUMENT_IDS':
+      return { ...state, activeDocumentIds: action.payload || [] };
+
+    case 'TOGGLE_ACTIVE_DOCUMENT': {
+      const id = action.payload;
+      const has = state.activeDocumentIds.includes(id);
+      return {
+        ...state,
+        activeDocumentIds: has
+          ? state.activeDocumentIds.filter(d => d !== id)
+          : [...state.activeDocumentIds, id],
+      };
+    }
+
+    // ─── Cross-agent baton-pass actions ─────────────────────────────────
+    case 'SET_LEARNING_OBJECTIVES':
+      return { ...state, learningObjectives: action.payload || {} };
+
+    case 'MERGE_LEARNING_OBJECTIVES': {
+      const incoming = action.payload || {};
+      return {
+        ...state,
+        learningObjectives: { ...state.learningObjectives, ...incoming },
+      };
+    }
+
+    /**
+     * Records the outcome of a quiz so the rest of the app (Planner, Tutor)
+     * can react to it.
+     *
+     * payload: {
+     *   subject, topic, percentage,
+     *   topicBreakdown?: [{ topic, correct, total }],
+     *   completedAt: ISOString,
+     * }
+     *
+     * Side effects on state:
+     *   - topicMastery for each topic gets updated (mastered ≥ 80, weak < 60)
+     *   - studyPlan tasks for mastered topics get marked completed
+     *   - Weak topics produce a remediation suggestion in agentInbox
+     */
+    case 'RECORD_QUIZ_OUTCOME': {
+      const p = action.payload || {};
+      const completedAt = p.completedAt || new Date().toISOString();
+      const breakdown = Array.isArray(p.topicBreakdown) && p.topicBreakdown.length > 0
+        ? p.topicBreakdown
+        : [{ topic: p.topic, correct: null, total: null, percentage: p.percentage }];
+      const overallPct = Number.isFinite(Number(p.percentage))
+        ? Math.round(Number(p.percentage))
+        : null;
+      const primaryTopic = String(p.topic || '').trim().toLowerCase();
+      const singleTopicQuiz = breakdown.length === 1;
+
+      const mastery = { ...(state.topicMastery || {}) };
+      const newRemediations = [];
+      let masteredTopics = new Set();
+
+      for (const item of breakdown) {
+        const topic = (item.topic || p.topic || '').trim();
+        if (!topic) continue;
+        const isPrimaryTopic = primaryTopic && topic.toLowerCase() === primaryTopic;
+        const rawPct = item.percentage != null
+          ? item.percentage
+          : (item.total ? Math.round((item.correct / item.total) * 100) : p.percentage);
+        // Keep Tutor remediation score aligned with what the student sees in the
+        // quiz result card for single-topic quizzes (or the quiz's primary topic).
+        const pct = (singleTopicQuiz || isPrimaryTopic) && overallPct != null
+          ? overallPct
+          : (Number.isFinite(Number(rawPct)) ? Math.round(Number(rawPct)) : 0);
+        const prev = mastery[topic] || { attempts: 0 };
+        const status = pct >= 80 ? 'mastered' : pct < 60 ? 'weak' : 'tracking';
+        mastery[topic] = {
+          status,
+          score: pct,
+          attempts: (prev.attempts || 0) + 1,
+          lastSubject: p.subject || prev.lastSubject || null,
+          lastAttemptAt: completedAt,
+        };
+        if (status === 'mastered') masteredTopics.add(topic.toLowerCase());
+        if (status === 'weak') {
+          newRemediations.push({
+            id: `rem-${topic}-${Date.now()}`,
+            kind: 'remediation',
+            topic,
+            subject: p.subject || prev.lastSubject || null,
+            score: pct,
+            createdAt: completedAt,
+            read: false,
+          });
+        }
+      }
+
+      // Roadmap progress: mark study tasks for mastered topics as completed.
+      const studyPlan = state.studyPlan.map(t => {
+        if (t.completed) return t;
+        const tTopic = (t.topic || '').toLowerCase();
+        return masteredTopics.has(tTopic) ? { ...t, completed: true } : t;
+      });
+
+      // Dedupe remediation by topic — keep newest, drop older entries for same topic.
+      const remTopics = new Set(newRemediations.map(r => r.topic.toLowerCase()));
+      const inbox = [
+        ...newRemediations,
+        ...(state.agentInbox || []).filter(it =>
+          it.kind !== 'remediation' || !remTopics.has((it.topic || '').toLowerCase())
+        ),
+      ].slice(0, 50);
+
+      return { ...state, topicMastery: mastery, studyPlan, agentInbox: inbox };
+    }
+
+    case 'MARK_INBOX_READ': {
+      const id = action.payload;
+      return {
+        ...state,
+        agentInbox: (state.agentInbox || []).map(it =>
+          it.id === id ? { ...it, read: true } : it
+        ),
+      };
+    }
+
+    case 'CLEAR_AGENT_INBOX':
+      return { ...state, agentInbox: [] };
 
     case 'RESET_DATA':
       return defaultState;

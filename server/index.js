@@ -10,6 +10,7 @@ const documentsRouter = require('./routes/documents');
 const plannerRouter = require('./routes/planner');
 const authRouter = require('./routes/auth');
 const userStateRouter = require('./routes/userState');
+const subjectsRouter = require('./routes/subjects');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -36,6 +37,7 @@ app.use('/api/user', userStateRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/planner', plannerRouter);
+app.use('/api/subjects', subjectsRouter);
 
 app.get('/api/health', async (req, res) => {
   const hasApiKey = !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'your_groq_api_key_here');

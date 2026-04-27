@@ -40,4 +40,15 @@ async function userOwnsDocument(userId, documentId) {
   return rows.length > 0;
 }
 
-module.exports = { ensureUserDocumentsIndexed, userOwnsDocument };
+// Returns the subset of provided document IDs that actually belong to the user.
+async function userOwnedDocumentIds(userId, documentIds = []) {
+  if (!Array.isArray(documentIds) || documentIds.length === 0) return [];
+  const pool = getPool();
+  const { rows } = await pool.query(
+    'SELECT id FROM user_documents WHERE user_id = $1 AND id = ANY($2::text[])',
+    [userId, documentIds],
+  );
+  return rows.map(r => r.id);
+}
+
+module.exports = { ensureUserDocumentsIndexed, userOwnsDocument, userOwnedDocumentIds };

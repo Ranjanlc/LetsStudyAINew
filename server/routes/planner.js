@@ -75,7 +75,7 @@ Return ONLY a valid JSON array, no markdown fences, no explanations:
 
   try {
     const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'qwen/qwen3-32b',
       messages: [
         {
           role: 'system',
@@ -164,6 +164,88 @@ Return ONLY the JSON object. No markdown, no extra text.`;
   } catch (err) {
     console.error('Planner insights error:', err);
     res.status(500).json({ error: 'Failed to get insights' });
+  }
+});
+
+// POST /api/planner/objectives
+// Generates per-topic "learning objectives" for the supplied subjects.
+// These are persisted by the Planner page into user_app_state.learningObjectives
+// and read by the Tutor + Evaluator at agent time (see services/agentContext.js).
+router.post('/objectives', async (req, res) => {
+  const { subjects } = req.body;
+  if (!Array.isArray(subjects) || subjects.length === 0) {
+    return res.status(400).json({ error: 'subjects array is required' });
+  }
+
+  const client = getGroqClient();
+  if (!client) {
+    return res.status(503).json({ error: 'GROQ_API_KEY not configured', fallback: true });
+  }
+
+  // Cap input size — we only need topic names + subject context.
+  const trimmed = subjects.slice(0, 8).map(s => ({
+    name: s.name,
+    topics: Array.isArray(s.topics) ? s.topics.slice(0, 12) : [],
+  }));
+
+  const prompt = `You are a curriculum designer. For each topic in each subject below, write 3 concise, measurable learning objectives a student should achieve to consider the topic mastered.
+
+Subjects:
+${JSON.stringify(trimmed, null, 2)}
+
+Output ONLY a valid JSON object of this shape (no markdown, no commentary):
+{
+  "TopicNameLower": {
+    "topic": "Topic Name",
+    "subject": "Subject Name",
+    "objectives": ["Objective 1", "Objective 2", "Objective 3"]
+  }
+}
+
+Use the topic name lowercased (no leading/trailing spaces) as the key. Keep each objective under 18 words. Make them concrete and testable (e.g., "Explain how X causes Y", "Apply formula Z to solve a problem").`;
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: 'qwen/qwen3-32b',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write structured curriculum learning objectives. Output ONLY a JSON object as described. No markdown fences, no commentary.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.4,
+      max_tokens: 2200,
+    });
+
+    const raw = completion.choices[0]?.message?.content || '{}';
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return res.status(500).json({ error: 'Failed to parse objectives', fallback: true });
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    // Normalize: ensure keys are lowercased trimmed topic names and shape is consistent.
+    const objectives = {};
+    for (const [rawKey, val] of Object.entries(parsed)) {
+      if (!val || typeof val !== 'object') continue;
+      const topic = String(val.topic || rawKey || '').trim();
+      if (!topic) continue;
+      const list = Array.isArray(val.objectives) ? val.objectives.filter(Boolean).map(String) : [];
+      if (list.length === 0) continue;
+      objectives[topic.toLowerCase()] = {
+        topic,
+        subject: String(val.subject || '').trim() || null,
+        objectives: list.slice(0, 5),
+      };
+    }
+
+    res.json({ objectives });
+  } catch (err) {
+    console.error('Planner objectives error:', err);
+    if (err.status === 429) return res.status(429).json({ error: 'Rate limit reached', fallback: true });
+    res.status(500).json({ error: 'Failed to generate objectives', fallback: true });
   }
 });
 

@@ -1,137 +1,57 @@
-# Project Plan — AI-Powered Personal Study Assistant
+## Phase 1: Data Model & Schema Updates
 
-**Course:** CSCI 4083  
-**Instructor:** Dr. Dileon Saint Jean  
-**Group Members:** Pankaj Bhatta, Ranjan Lamichhane, Aadarsha Aryal, Diwakar Mahato Sudi
+**Goal:** Establish a relational hierarchy for study materials so Planner data can be consumed by the Document Uploader and AI Agents.
 
----
+1.  **Introduce Subject Model/Table:**
+    - **Required Fields:** Unique Identifier, User Association (Foreign Key), Name (String), Timestamps.
+2.  **Introduce Chapter Model/Table:**
+    - **Required Fields:** Unique Identifier, Subject Association (Foreign Key), Name (String), Timestamps.
+3.  **Update Document Model/Table:**
+    - **New Requirement:** Add a Chapter Association (Foreign Key).
+    - **Constraint:** This must be a required field. A document cannot be saved without being linked to a chapter.
+4.  **Data Fetching Logic:** Ensure your database utility functions or ORM queries are updated to fetch Subjects with their nested Chapters and linked Documents.
 
-## What We're Building
+## Phase 2: Backend Logic & Upload Constraints
 
-We're building a web app called **LetsStudyAI** — a personal study assistant that uses multiple AI agents to help students study more effectively.
+**Goal:** Handle the new hierarchy and enforce strict upload rules.
 
-The problem we're solving: students have a lot of notes and study material but don't have a smart way to review them or get personalized help. Our app lets students upload their own notes and then ask questions from them, get a study schedule, and test themselves with quizzes — all in one place.
+1.  **Subject/Chapter Handlers:** Implement the backend logic required to create new subjects/chapters (based on Planner agent output) and fetch the user's nested hierarchy.
+2.  **Refactor Document Upload Handler:**
+    - Extract the `Chapter ID` from the incoming upload request payload.
+    - **Validation:** If the `Chapter ID` is missing, reject the request immediately with an error.
+    - Save the document and link it to the provided `Chapter ID`.
+3.  **Refactor Document Fetching Logic:** Update the logic that returns user documents so the payload is grouped hierarchically (Subject -> Chapter -> Documents).
 
----
+## Phase 3: Frontend Upload UI & State Management
 
-## The Three AI Agents
+**Goal:** Prevent orphaned documents by guiding the user through a strict selection flow before uploading.
 
-The project requirement says we need at least three types of AI agents. Here's what each one does:
+1.  **Global State:** Update the frontend state management to store and update the user's nested Subjects and Chapters.
+2.  **Upload Interface Refactor:**
+    - Implement two dependent selection inputs: "Select Subject" and "Select Chapter".
+    - **Logic:** The "Select Chapter" input must be disabled until a Subject is selected.
+    - **Constraint:** Disable the actual file upload dropzone/button completely if no Subject and Chapter are selected. Display a prompt asking the user to select them first.
 
-### 1. Planner Agent
-A goal-based agent. The student enters their subjects and deadlines, and the Planner Agent figures out a daily study schedule. It breaks bigger subjects into smaller sessions and assigns more time to high-priority ones.
+## Phase 4: Active Context Menu (Agent Synchronization)
 
-### 2. Tutor Agent
-A learning agent with RAG (Retrieval Augmented Generation). The student uploads their notes (PDF, Word, or text files), and when they ask a question, the Tutor Agent searches through those notes to find the relevant parts, then sends that context to the LLM to generate an answer. So the answer comes from the student's own material — not random internet stuff.
+**Goal:** Allow users to build a specific context window by selecting multiple slides/documents across different chapters.
 
-### 3. Evaluator Agent
-A utility agent. It generates multiple-choice quiz questions either from a general topic bank or directly from the student's uploaded documents. After the student completes the quiz, it scores it, gives feedback, and tracks performance over time.
+1.  **Interactive Context Selector UI:**
+    - Build a hierarchical menu (e.g., an accordion or tree view) displaying: Subject -> Chapter -> Checkboxes for specific Documents.
+    - Users must be able to check/uncheck multiple documents.
+2.  **State Update:** Track the selected materials in an array of `activeDocumentIds`.
+3.  **API Payload Refactor:** Update the frontend calls for the Tutor chat and Evaluator quiz generation to send the array of `activeDocumentIds` instead of a single document ID.
+4.  **RAG Engine Refactor:** Update the backend vector search function. It must accept an array of document IDs and filter the text chunks, performing its similarity search _only_ on the selected documents.
 
-All three agents work together. The Planner helps you know what to study, the Tutor helps you understand it, and the Evaluator checks if you actually learned it.
+## Phase 5: Evaluator Quiz Real-Time Feedback Refactor
 
----
+**Goal:** Provide immediate validation and explanations during the quiz without removing the final review screen.
 
-## How It Works (Architecture)
-
-```
-Student uploads notes (PDF/DOCX/TXT)
-         ↓
-Backend parses the file → splits into text chunks
-         ↓
-Chunks are stored in an in-memory TF-IDF vector store
-         ↓
-Student asks a question in the Tutor chat
-         ↓
-RAG Engine searches the vector store for relevant chunks
-         ↓
-Relevant chunks + student's question → sent to Groq LLM (Llama 3)
-         ↓
-AI generates an answer based on the student's own notes
-```
-
-For the Evaluator Agent, the same document content gets sent to the LLM with a prompt asking it to generate MCQ questions from that material.
-
----
-
-## Technology Choices
-
-| Technology | Why we chose it |
-|-----------|----------------|
-| React + Vite | Fast to build UI, we already knew React |
-| Node.js + Express | Simple to set up, good for REST APIs |
-| Groq API (Llama 3) | Completely free, very fast responses |
-| TF-IDF vector search | No external database needed, works in-memory |
-| pdf-parse + mammoth | Parse PDF and Word files without paid services |
-
-We deliberately kept the tech stack simple and free. No paid APIs, no external databases. Everything runs locally.
-
----
-
-## Task Breakdown
-
-| Week | Task | Who |
-|------|------|-----|
-| Week 1 | Project planning, UI wireframes, basic React setup | All |
-| Week 2 | Planner Agent — schedule generation logic | Aadarsha |
-| Week 2 | Evaluator Agent — quiz bank and scoring system | Diwakar |
-| Week 3 | Tutor Agent — backend setup, RAG pipeline, Groq integration | Pankaj |
-| Week 3 | Documents page — file upload and display | Pankaj |
-| Week 4 | System integration — connect all agents, routing, sidebar | Ranjan |
-| Week 4 | Evaluator upgrade — AI quiz from uploaded documents | Diwakar |
-| Week 5 | UI polish, testing, bug fixes | All |
-| Week 6 | Final testing, README, demo prep | All |
-
----
-
-## Individual Responsibilities
-
-**Pankaj Bhatta**
-- Built the entire Express.js backend
-- Implemented the RAG pipeline (document parser, vector store, RAG engine)
-- Integrated Groq API for real AI responses
-- Upgraded the Tutor Agent to use AI instead of hardcoded answers
-- Built the Documents upload page
-
-**Aadarsha Aryal**
-- Designed and built the Planner Agent logic
-- Schedule generation based on subjects, priorities, and deadlines
-
-**Diwakar Mahato Sudi**
-- Built the Evaluator Agent with the question bank
-- Implemented quiz scoring and performance tracking
-- Added AI-based quiz generation from uploaded documents
-
-**Ranjan Lamichhane**
-- Overall system design and architecture decisions
-- Frontend integration — connecting all pages and agents together
-- App routing and state management
-
----
-
-## What Makes This a Multi-Agent System
-
-Each agent is independent and has its own goal:
-
-- The **Planner Agent** doesn't know anything about quizzes or chat — it only cares about scheduling
-- The **Tutor Agent** doesn't know about the schedule — it only cares about answering questions accurately
-- The **Evaluator Agent** doesn't care how you studied — it only cares about testing what you know
-
-They share the same uploaded documents (through the RAG system) but operate independently. This is what makes it a multi-agent system rather than just one big app.
-
----
-
-## What We Learned
-
-- How RAG works in practice — connecting document search to an LLM
-- How to build a REST API with file upload support
-- How to use a free LLM API (Groq) effectively
-- How to structure a multi-agent system where agents have separate responsibilities
-- That TF-IDF is surprisingly effective for document search without needing a vector database
-
----
-
-## Known Limitations
-
-- The vector store is in-memory, so uploaded documents are lost when the server restarts
-- TF-IDF search is keyword-based — very specific or vague queries might not find the right chunks
-- The app needs both the frontend and backend running locally to work fully
+1.  **Update LLM Evaluator Prompt:**
+    - Modify the prompt instructions for generating the quiz JSON.
+    - **Requirement:** The LLM must include an `explanation` or `reason` field for the correct answer (or for each option) directly within the generated question schema.
+2.  **Refactor Quiz UI:**
+    - When the user selects an answer, immediately lock the question to prevent changing answers.
+    - Visually highlight the correct answer (e.g., green) and the user's incorrect answer (e.g., red) if they were wrong.
+    - Render the explanation/reason fetched from the JSON payload directly below the options.
+3.  **Final Review Screen:** Keep the existing end-of-quiz review screen intact as a summary of their performance.

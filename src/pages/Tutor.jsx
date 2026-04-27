@@ -9,16 +9,23 @@ import {
   HiOutlineExclamationCircle,
   HiOutlineAcademicCap,
 } from "react-icons/hi";
-import { apiFetch, API_ORIGIN } from "../lib/api";
+import { API_ORIGIN } from "../lib/api";
+import DocumentContextPicker from "../components/DocumentContextPicker";
 
 export default function Tutor() {
   const { state, dispatch } = useApp();
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [backendStatus, setBackendStatus] = useState(null); // null | { groqConfigured, docCount, model }
-  const [documents, setDocuments] = useState([]);
-  const [selectedDocId, setSelectedDocId] = useState("");
+  const [backendStatus, setBackendStatus] = useState(null);
   const chatEndRef = useRef(null);
+
+  const activeIds = state.activeDocumentIds;
+  const hasActiveDocs = activeIds.length > 0;
+
+  // Cross-agent inbox — pending remediation suggestions from the Evaluator.
+  const pendingRemediation = (state.agentInbox || []).filter(
+    it => it.kind === 'remediation' && !it.read
+  );
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -28,42 +35,69 @@ export default function Tutor() {
     checkBackend();
   }, []);
 
+  // Smart Remediation: when the user lands on the Tutor and has unread
+  // remediation suggestions from the Evaluator, surface a proactive greeting.
+  // We keep it lightweight — one assistant message offering a deep-dive on the
+  // weakest topic — and mark all related items as read so it isn't shown again.
+  useEffect(() => {
+    if (state.chatHistory.length > 0) return;
+    if (pendingRemediation.length === 0) return;
+
+    const weakest = [...pendingRemediation].sort((a, b) => (a.score || 0) - (b.score || 0))[0];
+    if (!weakest) return;
+
+    const others = pendingRemediation
+      .filter(r => r.id !== weakest.id)
+      .map(r => r.topic);
+    const otherLine = others.length > 0
+      ? `\n\nI also noticed gaps in: **${others.slice(0, 3).join(', ')}**. We can come back to those next.`
+      : '';
+
+    const greeting =
+      `Welcome back! I noticed your last quiz on **${weakest.topic}** scored ${weakest.score}%. ` +
+      `Want a quick 5-minute deep dive on it before we move on?${otherLine}`;
+
+    dispatch({
+      type: 'ADD_CHAT_MESSAGE',
+      payload: {
+        id: Date.now(),
+        role: 'assistant',
+        text: greeting,
+        type: 'remediation',
+        time: new Date().toISOString(),
+      },
+    });
+
+    for (const r of pendingRemediation) {
+      dispatch({ type: 'MARK_INBOX_READ', payload: r.id });
+    }
+    // Run only once per "fresh" tutor session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function checkBackend() {
     try {
-      const [healthRes, docsRes] = await Promise.all([
-        fetch(`${API_ORIGIN}/api/health`),
-        apiFetch("/api/documents"),
-      ]);
+      const healthRes = await fetch(`${API_ORIGIN}/api/health`);
       const health = await healthRes.json();
-      const docs = docsRes.ok ? await docsRes.json() : { documents: [] };
-      const docList = docs.documents || [];
-      setDocuments(docList);
-      setSelectedDocId((prev) => {
-        if (prev && docList.some((d) => d.id === prev)) return prev;
-        return docList[0]?.id || "";
-      });
       setBackendStatus({
         groqConfigured: health.groqConfigured,
-        docCount: docList.length,
         model: health.model,
       });
     } catch {
       setBackendStatus(null);
-      setDocuments([]);
-      setSelectedDocId("");
     }
   }
 
   const handleSend = async (e) => {
     e.preventDefault();
     if (!message.trim() || isLoading) return;
-    if (!selectedDocId) {
+    if (!hasActiveDocs) {
       dispatch({
         type: "ADD_CHAT_MESSAGE",
         payload: {
           id: Date.now() + 1,
           role: "assistant",
-          text: "Please select a document first. This tutor only answers from the selected document.",
+          text: "Please select at least one document in the context picker. This tutor only answers from your selected documents.",
           type: "error",
           time: new Date().toISOString(),
         },
@@ -88,7 +122,7 @@ export default function Tutor() {
       const response = await tutorAgent.getChatResponseAI(
         userMsg,
         state.chatHistory,
-        selectedDocId,
+        activeIds,
       );
       dispatch({
         type: "ADD_CHAT_MESSAGE",
@@ -161,34 +195,52 @@ export default function Tutor() {
             )}
             {backendStatus?.groqConfigured && (
               <span style={{ color: "var(--accent-success)", display: "flex", alignItems: "center", gap: 4 }}>
-                ✓ {backendStatus.model} · {backendStatus.docCount} document{backendStatus.docCount !== 1 ? "s" : ""} indexed
+                ✓ {backendStatus.model} · {activeIds.length} document{activeIds.length === 1 ? "" : "s"} active
               </span>
             )}
           </div>
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 12, padding: "12px 18px" }}>
-        <label style={{ display: "block", fontSize: "0.82rem", marginBottom: 6, color: "var(--text-muted)" }}>
-          Active document for Tutor chat
-        </label>
-        <select
-          className="form-control"
-          value={selectedDocId}
-          onChange={(e) => setSelectedDocId(e.target.value)}
-          disabled={isLoading || documents.length === 0}
+      <DocumentContextPicker title="Tutor context — choose documents" />
+
+      {/* Cross-agent suggestion strip — surfaces weak topics the Evaluator
+          flagged so the user can jump straight into remediation. */}
+      {pendingRemediation.length > 0 && (
+        <div
+          className="card"
+          style={{
+            marginTop: 12,
+            marginBottom: 12,
+            padding: '12px 16px',
+            border: '1px solid rgba(255,75,110,0.3)',
+            background: 'rgba(255,75,110,0.06)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
         >
-          {documents.length === 0 ? (
-            <option value="">No documents available</option>
-          ) : (
-            documents.map((doc) => (
-              <option key={doc.id} value={doc.id}>
-                {doc.name}
-              </option>
-            ))
-          )}
-        </select>
-      </div>
+          <HiOutlineExclamationCircle style={{ color: 'var(--accent-danger)', fontSize: '1.1rem', flexShrink: 0 }} />
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', flex: 1, minWidth: 200 }}>
+            The Evaluator flagged these topics as weak:&nbsp;
+            <strong style={{ color: 'var(--accent-danger)' }}>
+              {pendingRemediation.slice(0, 3).map(r => r.topic).join(', ')}
+            </strong>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {pendingRemediation.slice(0, 3).map(r => (
+              <button
+                key={r.id}
+                className="btn btn-secondary btn-sm"
+                onClick={() => setMessage(`Give me a focused deep dive on ${r.topic}, with examples I can practice.`)}
+              >
+                Deep-dive: {r.topic}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="chat-container">
         <div className="chat-messages">
@@ -199,9 +251,9 @@ export default function Tutor() {
               </div>
               <h3>Welcome to the Document Tutor</h3>
               <p>
-                {backendStatus?.docCount > 0
-                  ? "Ask questions only from the selected document."
-                  : "Upload notes in Documents first. This tutor will not answer outside your uploaded content."}
+                {hasActiveDocs
+                  ? `Answers will be drawn from the ${activeIds.length} document${activeIds.length === 1 ? "" : "s"} you selected.`
+                  : "Pick one or more documents in the context picker above. This tutor only answers from your selected content."}
               </p>
               <div className="chat-suggestions">
                 {[
@@ -266,18 +318,18 @@ export default function Tutor() {
             type="text"
             className="chat-input"
             placeholder={
-              selectedDocId
-                ? "Ask a question based only on the selected document..."
-                : "Select a document first..."
+              hasActiveDocs
+                ? "Ask a question based on your selected documents..."
+                : "Select at least one document above..."
             }
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            disabled={isLoading || !selectedDocId}
+            disabled={isLoading || !hasActiveDocs}
           />
           <button
             type="submit"
             className="btn btn-primary btn-icon chat-send"
-            disabled={!message.trim() || isLoading || !selectedDocId}
+            disabled={!message.trim() || isLoading || !hasActiveDocs}
           >
             <HiOutlinePaperAirplane />
           </button>

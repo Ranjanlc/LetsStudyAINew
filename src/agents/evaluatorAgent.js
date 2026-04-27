@@ -149,13 +149,23 @@ export const evaluatorAgent = {
     let score = 0;
     const results = [];
 
+    // Per-topic tally for the cross-agent feedback loop:
+    // { [topic]: { correct, total } }
+    const topicTally = {};
+
     quiz.questions.forEach((q, idx) => {
       const userAnswer = answers[idx];
       const isCorrect = userAnswer === q.correct;
       if (isCorrect) score++;
 
+      const topic = (q.topic && String(q.topic).trim()) || quiz.topic || 'General';
+      if (!topicTally[topic]) topicTally[topic] = { correct: 0, total: 0 };
+      topicTally[topic].total += 1;
+      if (isCorrect) topicTally[topic].correct += 1;
+
       results.push({
         question: q.question,
+        topic,
         userAnswer: userAnswer !== undefined ? q.options[userAnswer] : 'Not answered',
         correctAnswer: q.options[q.correct],
         isCorrect,
@@ -165,16 +175,25 @@ export const evaluatorAgent = {
 
     const percentage = Math.round((score / quiz.questions.length) * 100);
 
+    const topicBreakdown = Object.entries(topicTally).map(([topic, t]) => ({
+      topic,
+      correct: t.correct,
+      total: t.total,
+      percentage: t.total > 0 ? Math.round((t.correct / t.total) * 100) : 0,
+    }));
+
     return {
       quizId: quiz.id,
       subject: quiz.subject,
       topic: quiz.topic,
-      sourceDoc: quiz.sourceDoc || null,
+      sourceDoc: quiz.sourceDoc || (quiz.sourceDocs?.[0] ?? null),
+      sourceDocs: quiz.sourceDocs || (quiz.sourceDoc ? [quiz.sourceDoc] : []),
       score,
       totalQuestions: quiz.questions.length,
       percentage,
       grade: getGrade(percentage),
       results,
+      topicBreakdown,
       feedback: generateFeedback(percentage),
       completedAt: new Date().toISOString(),
     };

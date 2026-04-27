@@ -24,6 +24,22 @@ export const plannerAgent = {
     }
   },
 
+  // AI-generated per-topic learning objectives (the curriculum "contract" the
+  // Evaluator and Tutor read via the shared context briefing).
+  async generateLearningObjectives(subjects) {
+    try {
+      const res = await apiFetch('/api/planner/objectives', {
+        method: 'POST',
+        body: { subjects },
+      });
+      const data = await res.json();
+      if (!res.ok || data.fallback || !data.objectives) return null;
+      return data.objectives;
+    } catch {
+      return null;
+    }
+  },
+
   // Local rule-based schedule with deadline/difficulty/priority weighting
   generateSchedule(subjects) {
     const today = new Date();

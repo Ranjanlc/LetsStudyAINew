@@ -7,6 +7,7 @@ const { addChunks, removeDocument } = require('../rag/vectorStore');
 const { getPool } = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { ensureUserDocumentsIndexed } = require('../services/documentIndex');
+const library = require('../services/library');
 
 const router = express.Router();
 
@@ -38,10 +39,24 @@ const upload = multer({
 
 router.use(requireAuth);
 
-// POST /api/documents/upload
+// POST /api/documents/upload  (multipart: document file + chapterId field)
 router.post('/upload', upload.single('document'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded.' });
+  }
+
+  const chapterId = (req.body?.chapterId || '').trim();
+  if (!chapterId) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(400).json({
+      error: 'A chapter must be selected before uploading. Send chapterId with the upload.',
+    });
+  }
+
+  const ownsChapter = await library.chapterBelongsToUser(req.user.id, chapterId);
+  if (!ownsChapter) {
+    fs.unlink(req.file.path, () => {});
+    return res.status(404).json({ error: 'Selected chapter not found for this user.' });
   }
 
   const docId = `doc-${Date.now()}`;
@@ -55,9 +70,9 @@ router.post('/upload', upload.single('document'), async (req, res) => {
     addChunks(req.user.id, docId, originalName, chunks);
 
     await pool.query(
-      `INSERT INTO user_documents (id, user_id, name, file_path, word_count, chunk_count)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [docId, req.user.id, originalName, filePath, wordCount, chunks.length],
+      `INSERT INTO user_documents (id, user_id, name, file_path, word_count, chunk_count, chapter_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [docId, req.user.id, originalName, filePath, wordCount, chunks.length, chapterId],
     );
 
     const uploadedAt = new Date().toISOString();
@@ -68,6 +83,7 @@ router.post('/upload', upload.single('document'), async (req, res) => {
         name: originalName,
         wordCount,
         chunkCount: chunks.length,
+        chapterId,
         uploadedAt,
       },
     });
@@ -78,12 +94,34 @@ router.post('/upload', upload.single('document'), async (req, res) => {
 });
 
 // GET /api/documents
+// Returns flat list (with chapter/subject info) for back-compat,
+// and `?group=hierarchy` returns the nested Subject -> Chapter -> Document tree.
 router.get('/', async (req, res) => {
   await ensureUserDocumentsIndexed(req.user.id);
+
+  if (req.query.group === 'hierarchy') {
+    const subjects = await library.listHierarchy(req.user.id);
+    return res.json({ subjects });
+  }
+
   const pool = getPool();
   const { rows } = await pool.query(
-    `SELECT id, name, word_count AS "wordCount", chunk_count AS "chunkCount", uploaded_at AS "uploadedAt"
-     FROM user_documents WHERE user_id = $1 ORDER BY uploaded_at DESC`,
+    `SELECT
+        d.id,
+        d.name,
+        d.word_count   AS "wordCount",
+        d.chunk_count  AS "chunkCount",
+        d.uploaded_at  AS "uploadedAt",
+        d.chapter_id   AS "chapterId",
+        c.name         AS "chapterName",
+        s.id           AS "subjectId",
+        s.name         AS "subjectName",
+        s.color        AS "subjectColor"
+     FROM user_documents d
+     LEFT JOIN chapters c ON c.id = d.chapter_id
+     LEFT JOIN subjects s ON s.id = c.subject_id
+     WHERE d.user_id = $1
+     ORDER BY d.uploaded_at DESC`,
     [req.user.id],
   );
   res.json({ documents: rows });

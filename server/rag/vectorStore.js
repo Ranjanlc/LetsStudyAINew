@@ -109,10 +109,20 @@ function removeDocument(userId, docId) {
   }
 }
 
-function search(userId, query, topK = 5, documentId = null) {
+function normalizeDocFilter(documentIds) {
+  if (documentIds == null) return null;
+  if (Array.isArray(documentIds)) {
+    const filtered = documentIds.filter(Boolean);
+    return filtered.length === 0 ? null : new Set(filtered);
+  }
+  return new Set([documentIds]);
+}
+
+function search(userId, query, topK = 5, documentIds = null) {
   const userDocuments = getUserChunks(userId);
-  const documents = documentId
-    ? userDocuments.filter(d => d.docId === documentId)
+  const allowed = normalizeDocFilter(documentIds);
+  const documents = allowed
+    ? userDocuments.filter(d => allowed.has(d.docId))
     : userDocuments;
   if (documents.length === 0) return [];
 
@@ -148,9 +158,10 @@ function getDocumentList(userId) {
   return list;
 }
 
-function getTotalChunks(userId, documentId = null) {
-  if (!documentId) return getUserChunks(userId).length;
-  return getUserChunks(userId).filter(d => d.docId === documentId).length;
+function getTotalChunks(userId, documentIds = null) {
+  const allowed = normalizeDocFilter(documentIds);
+  if (!allowed) return getUserChunks(userId).length;
+  return getUserChunks(userId).filter(d => allowed.has(d.docId)).length;
 }
 
 function getDocumentChunks(userId, docId) {
